@@ -1,14 +1,13 @@
 import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Send, X, Bot, User, Loader2, Link2 } from 'lucide-react';
-import { chatWithAssistant, TaxAnalysisResult } from '../lib/gemini';
-import { UserProfile } from '../types';
+import { chatWithAssistant } from '../lib/gemini';
+import { UserProfile, TaxAnalysisResult } from '../types';
 import { cn } from '../lib/utils';
 
 export default function Assistant({ 
   profile, 
   discovery,
-  onBack, // Added for completeness if needed elsewhere, but focus on props
   onClose, 
   isOnline 
 }: { 

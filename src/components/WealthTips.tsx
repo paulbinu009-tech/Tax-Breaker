@@ -1,9 +1,8 @@
 import * as React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Lightbulb, ArrowRight, ShieldCheck, TrendingUp, AlertTriangle, Target, Zap } from 'lucide-react';
-import { UserProfile } from '../types';
+import { UserProfile, TaxAnalysisResult } from '../types';
 import { cn } from '../lib/utils';
-import { TaxAnalysisResult } from '../lib/gemini';
 
 interface Tip {
   id: string;

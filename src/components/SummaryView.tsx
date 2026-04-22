@@ -1,12 +1,11 @@
 import * as React from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Download, ChevronLeft, FileText, CheckCircle2, TrendingUp, Shield, Activity, ArrowRight, Zap, Target } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
 import { cn } from '../lib/utils';
-import { UserProfile, TaxCalculationResult } from '../types';
+import { UserProfile, TaxCalculationResult, TaxAnalysisResult } from '../types';
 import { calculateTax } from '../lib/taxCalculations';
-import { TaxAnalysisResult } from '../lib/gemini';
 
 export default function SummaryView({ 
   profile, 
@@ -19,6 +18,7 @@ export default function SummaryView({
 }) {
   const reportRef = React.useRef<HTMLDivElement>(null);
   const [isGenerating, setIsGenerating] = React.useState(false);
+  const [errorStatus, setErrorStatus] = React.useState<string | null>(null);
 
   // Recalculate results for current profile data
   const deductionsData = discovery || {};
@@ -31,33 +31,69 @@ export default function SummaryView({
   const savings = Math.abs(oldRegimeResults.totalTax - newRegimeResults.totalTax);
   
   // Detailed deductions sum
-  const totalDeductions = Object.values(deductionsData).reduce((acc, val) => {
+  const totalDeductions = Object.values(deductionsData || {}).reduce((acc: number, val) => {
     return typeof val === 'number' ? acc + val : acc;
   }, 0) + bestResults.standardDeduction;
 
   const exportPDF = async () => {
     if (!reportRef.current) return;
     setIsGenerating(true);
+    setErrorStatus(null);
+
     try {
+      // Optimize canvas generation: High scale for quality, but filtered for weight
       const canvas = await html2canvas(reportRef.current, {
-        scale: 2,
+        scale: 1.5, // Reduced from 2 to keep file size down as requested
         useCORS: true,
         backgroundColor: '#050505',
-        logging: false
+        logging: false,
+        allowTaint: true,
+        imageTimeout: 15000,
       });
-      const imgData = canvas.toDataURL('image/png');
-      const pdf = new jsPDF('p', 'mm', 'a4');
-      const imgProps = pdf.getImageProperties(imgData);
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.75); // Use JPEG with 0.75 quality for speed/size balance
+      const pdf = new jsPDF({
+        orientation: 'p',
+        unit: 'mm',
+        format: 'a4',
+        compress: true // Enable internal compression
+      });
+
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      const pdfHeight = pdf.internal.pageSize.getHeight();
       
-      // If content is longer than one page, we might need multiple pages, 
-      // but for a summary one page is usually enough if we scale appropriately.
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, Math.min(pdfHeight, 297)); 
+      // Calculate display height maintaining aspect ratio
+      const canvasRatio = canvas.height / canvas.width;
+      const displayHeight = pdfWidth * canvasRatio;
+
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, Math.min(displayHeight, pdfHeight));
       
-      pdf.save(`TaxBreaker_Report_${profile.displayName?.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.pdf`);
+      const fileName = `TaxBreaker_Report_${profile.displayName?.replace(/\s+/g, '_') || 'Audit'}.pdf`;
+      const pdfBlob = pdf.output('blob');
+
+      // Native Share Sheet Integration (Web Share API)
+      // This is the bulletproof equivalent of expo-sharing on mobile browsers
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([pdfBlob], fileName, { type: 'application/pdf' })] })) {
+        const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+        try {
+          await navigator.share({
+            files: [file],
+            title: 'TaxBreaker Audit Summary',
+            text: 'Here is your personalized tax optimization strategy from TaxBreaker.',
+          });
+        } catch (shareError) {
+          if ((shareError as Error).name !== 'AbortError') {
+             // Fallback to direct download if share fails or is cancelled with error
+             pdf.save(fileName);
+          }
+        }
+      } else {
+        // Fallback for desktop or non-sharing browsers
+        pdf.save(fileName);
+      }
     } catch (error) {
-      console.error('PDF export failed', error);
+      console.error('CRITICAL: PDF Export failed', error);
+      setErrorStatus('Export failed, try again');
     } finally {
       setIsGenerating(false);
     }
@@ -83,23 +119,37 @@ export default function SummaryView({
             <p className="text-apple-text-tertiary text-subtext uppercase tracking-widest font-bold mt-1">Audit-Ready Financial Intelligence</p>
           </div>
         </div>
-        <button 
-          onClick={exportPDF}
-          disabled={isGenerating}
-          className="premium-btn-primary h-12 px-8 flex items-center gap-3 disabled:opacity-50 whitespace-nowrap"
-        >
-          {isGenerating ? (
-            <>
-              <Activity className="w-4 h-4 animate-pulse" />
-              <span>Generating Report...</span>
-            </>
-          ) : (
-            <>
-              <Download className="w-4 h-4" />
-              <span>Download PDF Audit</span>
-            </>
-          )}
-        </button>
+        <div className="flex flex-col items-end gap-2">
+          <button 
+            onClick={exportPDF}
+            disabled={isGenerating}
+            className="premium-btn-primary h-12 px-8 flex items-center gap-3 disabled:opacity-50 whitespace-nowrap"
+          >
+            {isGenerating ? (
+              <>
+                <Activity className="w-4 h-4 animate-pulse" />
+                <span>Generating Report...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4" />
+                <span>Download & Share Audit</span>
+              </>
+            )}
+          </button>
+          <AnimatePresence>
+            {errorStatus && (
+              <motion.p 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="text-caption text-apple-error font-bold uppercase tracking-widest"
+              >
+                {errorStatus}
+              </motion.p>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
 
       <div ref={reportRef} className="space-y-10 bg-[#050505] p-10 md:p-16 rounded-[40px] border border-white/10 shadow-2xl overflow-hidden relative">

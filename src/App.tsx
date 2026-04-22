@@ -29,8 +29,8 @@ import {
 } from 'lucide-react';
 import { auth, googleProvider, db } from './lib/firebase';
 import { cn } from './lib/utils';
-import { UserProfile, TaxDocument, OptimizationStep, TaxDeductions, TaxCalculationResult } from './types';
-import { analyzeTaxDocuments, TaxAnalysisResult } from './lib/gemini';
+import { UserProfile, TaxDocument, OptimizationStep, TaxDeductions, TaxCalculationResult, TaxAnalysisResult } from './types';
+import { analyzeTaxDocuments } from './lib/gemini';
 import Assistant from './components/Assistant';
 import { calculateTax } from './lib/taxCalculations';
 import { TAX_RULES, updateTaxRules } from './config/taxRules';
@@ -51,7 +51,7 @@ export default function App() {
   const [currentView, setCurrentView] = React.useState<'landing' | 'onboarding' | 'dashboard' | 'vault' | 'simulator' | 'profile' | 'privacy' | 'terms' | 'guide' | 'summary'>('landing');
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const [isAssistantOpen, setIsAssistantOpen] = React.useState(false);
-  const [discovery, setDiscovery] = React.useState<TaxAnalysisResult['extractedValues'] | null>(null);
+  const [discovery, setDiscovery] = React.useState<TaxAnalysisResult | null>(null);
   const [hasConsented, setHasConsented] = React.useState(() => {
     return localStorage.getItem('taxbreaker_consent') === 'true';
   });
@@ -336,12 +336,12 @@ export default function App() {
           )}
           {currentView === 'vault' && profile && (
             <motion.div key="vault" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <VaultView userId={profile.uid} onDiscover={(vals) => setDiscovery(vals)} isOnline={isOnline} />
+              <VaultView userId={profile.uid} onDiscover={(result) => setDiscovery(result)} isOnline={isOnline} />
             </motion.div>
           )}
           {currentView === 'simulator' && profile && (
             <motion.div key="simulator" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <TaxCalculator profile={profile} discovery={discovery} />
+              <TaxCalculator profile={profile} discovery={discovery?.extractedValues || null} />
             </motion.div>
           )}
           {currentView === 'guide' && profile && (
@@ -365,7 +365,7 @@ export default function App() {
           )}
           {currentView === 'summary' && profile && (
             <motion.div key="summary" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <SummaryView profile={profile} discovery={discovery} onBack={() => setCurrentView('dashboard')} />
+              <SummaryView profile={profile} discovery={discovery?.extractedValues || null} onBack={() => setCurrentView('dashboard')} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -684,17 +684,18 @@ function OnboardingView({ profile, onComplete }: { profile: UserProfile, onCompl
 
 function DashboardView({ 
   profile, 
-  discovery, 
+  discovery: fullDiscovery, 
   isOnline,
   onOpenSummary,
   onOpenGuide
 }: { 
   profile: UserProfile, 
-  discovery: TaxAnalysisResult['extractedValues'] | null, 
+  discovery: TaxAnalysisResult | null, 
   isOnline: boolean,
   onOpenSummary: () => void,
   onOpenGuide: () => void
 }) {
+  const discovery = fullDiscovery?.extractedValues;
   // Logic for dynamic alerts
   const show80CWarning = discovery && (discovery.section80C || 0) < 150000;
   const showTDSWarning = discovery && (discovery.tds || 0) > 0;
@@ -803,7 +804,7 @@ function DashboardView({
             </motion.div>
           </div>
 
-          <WealthTips profile={profile} discovery={discovery} />
+          <WealthTips profile={profile} discovery={fullDiscovery} />
 
           <div>
             <SectionHeader title="Strategic Timeline" icon={<TrendingUp className="w-4 h-4" />} />
@@ -864,9 +865,9 @@ function TimelineItem({ date, title, status, sub }: { date: string, title: strin
   );
 }
 
-function VaultView({ userId, onDiscover, isOnline }: { userId: string, onDiscover: (vals: TaxAnalysisResult['extractedValues']) => void, isOnline: boolean }) {
+function VaultView({ userId, onDiscover, isOnline }: { userId: string, onDiscover: (result: TaxAnalysisResult) => void, isOnline: boolean }) {
   const [analyzing, setAnalyzing] = React.useState(false);
-  const [result, setResult] = React.useState<any>(null);
+  const [result, setResult] = React.useState<TaxAnalysisResult | null>(null);
   const [stagedFile, setStagedFile] = React.useState<File | null>(null);
   const [analysisError, setAnalysisError] = React.useState<string | null>(null);
   const [showPermissionModal, setShowPermissionModal] = React.useState(false);
@@ -915,9 +916,7 @@ function VaultView({ userId, onDiscover, isOnline }: { userId: string, onDiscove
         const text = reader.result as string;
         const analysis = await analyzeTaxDocuments({ uid: userId }, [text]);
         setResult(analysis);
-        if (analysis.extractedValues) {
-          onDiscover(analysis.extractedValues);
-        }
+        onDiscover(analysis);
         setAnalyzing(false);
         setStagedFile(null); 
         setAnalysisError(null);
@@ -1454,6 +1453,34 @@ function ActionPlanCard({ step, number, done, onToggle }: ActionPlanCardProps) {
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+function FilterBtn({ children, active, icon }: { children: React.ReactNode, active?: boolean, icon: React.ReactNode }) {
+  return (
+    <button className={cn(
+      "w-full flex items-center gap-4 px-6 py-4 rounded-2xl text-subtext font-bold transition-all duration-500 border",
+      active 
+        ? "bg-gold/10 border-gold/30 text-gold shadow-[0_0_20px_rgba(212,175,55,0.1)]" 
+        : "bg-apple-card border-white/5 text-apple-text-tertiary hover:bg-apple-elevated hover:text-white"
+    )}>
+      <div className={cn(
+        "p-2 rounded-lg transition-colors",
+        active ? "bg-gold text-black" : "bg-apple-elevated text-apple-text-tertiary"
+      )}>
+        {icon}
+      </div>
+      {children}
+    </button>
+  );
+}
+
+function DiscoveryItem({ label, value }: { label: string, value: number }) {
+  return (
+    <div className="flex justify-between items-center py-2 border-b border-white/5 last:border-0">
+      <span className="text-caption font-bold text-apple-text-tertiary uppercase tracking-widest">{label}</span>
+      <span className="text-subtext font-bold text-white">₹{value.toLocaleString()}</span>
     </div>
   );
 }

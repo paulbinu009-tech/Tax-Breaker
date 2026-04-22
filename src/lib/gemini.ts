@@ -1,53 +1,12 @@
 import { GoogleGenAI } from "@google/genai";
 import { TAX_RULES } from "../config/taxRules";
+import { TaxAnalysisResult } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export const TAX_MODEL = "gemini-3.1-pro-preview";
 
 const TAX_RULES_CONTEXT = JSON.stringify(TAX_RULES.FY_2024_25, null, 2);
-
-export interface TaxAnalysisResult {
-  optimizationOpportunities: Array<{
-    title: string;
-    description: string;
-    lawReference: string;
-    confidence: number;
-    impact: "High" | "Medium" | "Low";
-  }>;
-  actionPlan: Array<{
-    id: string;
-    title: string;
-    action: string;
-    why: string;
-    law: string;
-    benefit: number;
-    priority: "High" | "Medium" | "Low";
-  }>;
-  extractedValues?: {
-    salary?: number;
-    tds?: number;
-    section80C?: number;
-    section80D?: number;
-    section24?: number;
-    hra?: number;
-    nps?: number;
-  };
-  complianceGaps: Array<{
-    title: string;
-    description: string;
-    riskLevel: "High" | "Medium" | "Low";
-    action: string;
-  }>;
-  auditRiskScore: number;
-  missedDeductions: string[];
-  nextBestAction: {
-    title: string;
-    description: string;
-    potentialSavings: number;
-  };
-  reasoning: string;
-}
 
 export async function analyzeTaxDocuments(
   userProfile: any,
