@@ -1,0 +1,89 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user tax profile and settings.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "onboardingComplete": { "type": "boolean" },
+        "country": { "type": "string" },
+        "employmentType": { "type": "string" },
+        "income": { "type": "number" },
+        "assets": { "type": "string" },
+        "goals": { "type": "array", "items": { "type": "string" } },
+        "taxScore": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "Document": {
+      "title": "Tax Document",
+      "description": "Metadata for uploaded tax documents.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "size": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "processing", "parsed", "error"] },
+        "category": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "type"]
+    },
+    "AnalysisReport": {
+      "title": "Tax Analysis Report",
+      "description": "AI-generated insights and recommendations.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "documentIds": { "type": "array", "items": { "type": "string" } },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "optimizationOpportunities": { "type": "array" },
+        "complianceGaps": { "type": "array" },
+        "auditRiskScore": { "type": "number" },
+        "missedDeductions": { "type": "array" },
+        "nextBestAction": { "type": "object" },
+        "roadmap": { "type": "array" }
+      },
+      "required": ["userId"]
+    },
+    "Simulation": {
+      "title": "Scenario Simulation",
+      "description": "Stores tax scenario simulations.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "inputs": { "type": "object" },
+        "projectedOutcomes": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles."
+    },
+    "/users/{userId}/documents/{documentId}": {
+      "schema": "Document",
+      "description": "User tax documents."
+    },
+    "/users/{userId}/reports/{reportId}": {
+      "schema": "AnalysisReport",
+      "description": "AI tax analysis reports."
+    },
+    "/users/{userId}/simulations/{simulationId}": {
+      "schema": "Simulation",
+      "description": "Tax scenario simulations."
+    }
+  }
+}
