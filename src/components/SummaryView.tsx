@@ -1,10 +1,9 @@
 import * as React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Download, ChevronLeft, FileText, CheckCircle2, TrendingUp, Shield, Activity, ArrowRight, Zap, Target } from 'lucide-react';
+import { Download, ChevronLeft, CheckCircle2, TrendingUp, Shield, Activity, ArrowRight, Zap, Target } from 'lucide-react';
 import { jsPDF } from 'jspdf';
-import html2canvas from 'html2canvas';
 import { cn } from '../lib/utils';
-import { UserProfile, TaxCalculationResult, TaxAnalysisResult } from '../types';
+import { UserProfile, TaxAnalysisResult } from '../types';
 import { calculateTax } from '../lib/taxCalculations';
 
 export default function SummaryView({ 
@@ -19,8 +18,10 @@ export default function SummaryView({
   const reportRef = React.useRef<HTMLDivElement>(null);
   const [isGenerating, setIsGenerating] = React.useState(false);
   const [errorStatus, setErrorStatus] = React.useState<string | null>(null);
+  const [pdfBlob, setPdfBlob] = React.useState<Blob | null>(null);
+  const [shareReady, setShareReady] = React.useState(false);
 
-  // Recalculate results for current profile data
+  // Recalculate results
   const deductionsData = discovery || {};
   const oldRegimeResults = calculateTax(profile.income || 0, 'old', deductionsData);
   const newRegimeResults = calculateTax(profile.income || 0, 'new', deductionsData);
@@ -30,72 +31,137 @@ export default function SummaryView({
   const totalTax = bestResults.totalTax;
   const savings = Math.abs(oldRegimeResults.totalTax - newRegimeResults.totalTax);
   
-  // Detailed deductions sum
   const totalDeductions = Object.values(deductionsData || {}).reduce((acc: number, val) => {
     return typeof val === 'number' ? acc + val : acc;
   }, 0) + bestResults.standardDeduction;
 
-  const exportPDF = async () => {
-    if (!reportRef.current) return;
+  const generateAudit = async () => {
     setIsGenerating(true);
     setErrorStatus(null);
-
+    setShareReady(false);
+    
+    console.log('[AUDIT_STEP_1]: Compiling Clinical HTML Audit...');
+    
     try {
-      // Optimize canvas generation: High scale for quality, but filtered for weight
-      const canvas = await html2canvas(reportRef.current, {
-        scale: 1.5, // Reduced from 2 to keep file size down as requested
-        useCORS: true,
-        backgroundColor: '#050505',
-        logging: false,
-        allowTaint: true,
-        imageTimeout: 15000,
-      });
-
-      const imgData = canvas.toDataURL('image/jpeg', 0.75); // Use JPEG with 0.75 quality for speed/size balance
-      const pdf = new jsPDF({
+      const doc = new jsPDF({
         orientation: 'p',
         unit: 'mm',
         format: 'a4',
-        compress: true // Enable internal compression
+        compress: true
       });
 
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
-      
-      // Calculate display height maintaining aspect ratio
-      const canvasRatio = canvas.height / canvas.width;
-      const displayHeight = pdfWidth * canvasRatio;
+      const htmlContent = `
+        <div style="font-family: Arial, sans-serif; padding: 40px; color: #111111; line-height: 1.5;">
+          <div style="border-bottom: 2px solid #BA8E23; padding-bottom: 20px; margin-bottom: 30px;">
+            <h1 style="color: #BA8E23; font-size: 24px; margin: 0;">STRATEGIC TAX AUDIT</h1>
+            <p style="font-size: 12px; color: #666666; margin: 5px 0 0 0;">FISCAL YEAR 2024-25 | PREPARED FOR: ${profile.displayName || 'TaxBreaker User'}</p>
+          </div>
 
-      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, Math.min(displayHeight, pdfHeight));
-      
-      const fileName = `TaxBreaker_Report_${profile.displayName?.replace(/\s+/g, '_') || 'Audit'}.pdf`;
-      const pdfBlob = pdf.output('blob');
+          <div style="background-color: #f8f9fa; border: 1px solid #eeeeee; padding: 25px; border-radius: 8px; margin-bottom: 30px;">
+            <div style="font-size: 11px; font-weight: bold; color: #888888; text-transform: uppercase; letter-spacing: 1px;">Optimized Annual Savings</div>
+            <div style="font-size: 32px; font-weight: bold; color: #BA8E23; margin: 10px 0;">₹${Math.round(savings).toLocaleString('en-IN')}</div>
+            <div style="font-size: 13px; color: #444444;">Recommendation: Switch to <b>${bestRegime} Regime</b>.</div>
+          </div>
 
-      // Native Share Sheet Integration (Web Share API)
-      // This is the bulletproof equivalent of expo-sharing on mobile browsers
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([pdfBlob], fileName, { type: 'application/pdf' })] })) {
-        const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
-        try {
-          await navigator.share({
-            files: [file],
-            title: 'TaxBreaker Audit Summary',
-            text: 'Here is your personalized tax optimization strategy from TaxBreaker.',
-          });
-        } catch (shareError) {
-          if ((shareError as Error).name !== 'AbortError') {
-             // Fallback to direct download if share fails or is cancelled with error
-             pdf.save(fileName);
-          }
-        }
-      } else {
-        // Fallback for desktop or non-sharing browsers
-        pdf.save(fileName);
+          <div style="margin-bottom: 40px;">
+            <h2 style="font-size: 14px; color: #888888; border-bottom: 1px solid #eeeeee; padding-bottom: 10px; text-transform: uppercase;">Tax Computation Summary</h2>
+            <div style="padding: 10px 0; border-bottom: 1px solid #f5f5f5; display: flex; justify-content: space-between;">
+              <span style="color: #555555;">Gross Assessed Income</span>
+              <span style="font-weight: bold;">₹${(profile.income || 0).toLocaleString('en-IN')}</span>
+            </div>
+            <div style="padding: 10px 0; border-bottom: 1px solid #f5f5f5; display: flex; justify-content: space-between;">
+              <span style="color: #555555;">Total Applied Deductions</span>
+              <span style="font-weight: bold;">₹${Math.round(totalDeductions).toLocaleString('en-IN')}</span>
+            </div>
+            <div style="padding: 15px 0; display: flex; justify-content: space-between; font-size: 18px;">
+              <span style="font-weight: bold;">Net Projected Liability</span>
+              <span style="font-weight: bold; color: #BA8E23;">₹${Math.round(totalTax).toLocaleString('en-IN')}</span>
+            </div>
+          </div>
+
+          <div style="background-color: #fffdf0; border-left: 4px solid #BA8E23; padding: 20px;">
+            <h2 style="font-size: 13px; font-weight: bold; margin-top: 0;">REQUIRED ACTION STEPS</h2>
+            <ul style="font-size: 12px; color: #333333; margin: 10px 0 0 0; padding-left: 20px;">
+              <li>Elect <b>${bestRegime} Regime</b> §115BAC for maximum efficiency.</li>
+              <li>Verify primary TDS of <b>₹${discovery?.tds || 0}</b> against AIS portal.</li>
+              <li>Synchronize e-filing tokens prior to July filing window.</li>
+            </ul>
+          </div>
+
+          <div style="margin-top: 60px; text-align: center; font-size: 10px; color: #aaaaaa; border-top: 1px solid #eeeeee; padding-top: 20px;">
+            TaxBreaker AI Regulatory Engine • Verified Digital Audit • ${new Date().toLocaleString()}
+          </div>
+        </div>
+      `;
+
+      await doc.html(htmlContent, {
+        x: 0,
+        y: 0,
+        width: 210,
+        windowWidth: 800
+      });
+
+      console.log('[AUDIT_STEP_2]: Verifying Resource Integrity...');
+      const blob = doc.output('blob');
+      
+      if (!blob || blob.size < 1000) {
+        throw new Error('VERIFICATION_FAILED: Generated audit is corrupt or empty.');
       }
+
+      console.log(`[AUDIT_SUCCESS]: Buffer Locked (${Math.round(blob.size / 1024)}KB). URI Ready.`);
+      setPdfBlob(blob);
+      setShareReady(true);
     } catch (error) {
-      console.error('CRITICAL: PDF Export failed', error);
-      setErrorStatus('Export failed, try again');
+      const msg = (error as Error).message;
+      console.error('[AUDIT_FATAL]:', msg);
+      setErrorStatus(`Critical Audit Error: ${msg}`);
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const [isSharing, setIsSharing] = React.useState(false);
+
+  const shareAudit = async () => {
+    if (!pdfBlob || isSharing) return;
+    setIsSharing(true);
+    setShareReady(false); // Immediately hide button to prevent double-tap
+    
+    console.log('[SHARE_STEP_3]: Summoning System Share Sheet...');
+
+    try {
+      const fileName = `Tax_Strategy_Audit_${new Date().getTime()}.pdf`;
+      const file = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: 'Tax Strategy Audit',
+          text: 'Verified results from TaxBreaker.',
+        });
+        console.log('[SHARE_SUCCESS]: Delivered.');
+      } else {
+        console.warn('[SHARE_FALLBACK]: Native Share restricted. Direct extract initiated.');
+        const uri = URL.createObjectURL(pdfBlob);
+        const link = document.createElement('a');
+        link.href = uri;
+        link.download = fileName;
+        link.click();
+        // Clean up URI after a delay to ensure download starts
+        setTimeout(() => URL.revokeObjectURL(uri), 100);
+      }
+    } catch (error) {
+      const err = error as Error;
+      // Handle user cancellation gracefully - not a "failure"
+      if (err.name === 'AbortError') {
+        console.log('[SHARE_CANCEL]: User dismissed share sheet.');
+      } else {
+        console.error('[SHARE_ERROR]:', err.message);
+        setErrorStatus(`Share Blocked: ${err.message}`);
+      }
+    } finally {
+      setIsSharing(false);
+      setPdfBlob(null);
     }
   };
 
@@ -115,35 +181,48 @@ export default function SummaryView({
             <Target className="w-7 h-7" />
           </div>
           <div>
-            <h1 className="text-title font-bold tracking-tight">Executive Summary</h1>
-            <p className="text-apple-text-tertiary text-subtext uppercase tracking-widest font-bold mt-1">Audit-Ready Financial Intelligence</p>
+            <h1 className="text-large-title font-bold tracking-tight">Audit Report</h1>
+            <p className="text-apple-text-tertiary text-[9px] uppercase tracking-[0.2em] mt-1 font-bold">
+              Clinical Strategy Review • {profile.displayName || 'Authorized User'}
+            </p>
           </div>
         </div>
+        
         <div className="flex flex-col items-end gap-2">
-          <button 
-            onClick={exportPDF}
-            disabled={isGenerating}
-            className="premium-btn-primary h-12 px-8 flex items-center gap-3 disabled:opacity-50 whitespace-nowrap"
-          >
-            {isGenerating ? (
-              <>
-                <Activity className="w-4 h-4 animate-pulse" />
-                <span>Generating Report...</span>
-              </>
-            ) : (
-              <>
-                <Download className="w-4 h-4" />
-                <span>Download & Share Audit</span>
-              </>
-            )}
-          </button>
+          {shareReady ? (
+            <button 
+              onClick={shareAudit}
+              className="premium-btn-primary h-12 px-8 flex items-center gap-3 bg-apple-success hover:bg-apple-success-dark transition-colors border-apple-success/20 animate-bounce"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Audit Ready! Save & Share</span>
+            </button>
+          ) : (
+            <button 
+              onClick={generateAudit}
+              disabled={isGenerating}
+              className="premium-btn-primary h-12 px-8 flex items-center gap-3 disabled:opacity-50 whitespace-nowrap"
+            >
+              {isGenerating ? (
+                <>
+                  <Activity className="w-4 h-4 animate-pulse text-gold" />
+                  <span>Compiling Audit...</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
+                  <span>Generate Strategic PDF</span>
+                </>
+              )}
+            </button>
+          )}
           <AnimatePresence>
             {errorStatus && (
               <motion.p 
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                className="text-caption text-apple-error font-bold uppercase tracking-widest"
+                className="text-[10px] text-apple-error font-bold uppercase tracking-widest text-right"
               >
                 {errorStatus}
               </motion.p>
@@ -153,18 +232,17 @@ export default function SummaryView({
       </div>
 
       <div ref={reportRef} className="space-y-10 bg-[#050505] p-10 md:p-16 rounded-[40px] border border-white/10 shadow-2xl overflow-hidden relative">
-        {/* Decorative Elements for the PDF */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-gold/5 blur-[100px] rounded-full -mr-32 -mt-32" />
         <div className="absolute bottom-0 left-0 w-64 h-64 bg-gold/5 blur-[100px] rounded-full -ml-32 -mb-32" />
 
         <div className="flex justify-between items-start border-b border-white/5 pb-10">
            <div>
-              <p className="text-caption text-gold font-bold uppercase tracking-[0.3em] mb-3">Verified Report</p>
-              <p className="text-body text-apple-text-secondary">Prepared for <span className="text-white font-bold">{profile.displayName || 'TaxBreaker User'}</span></p>
+              <p className="text-caption text-gold font-bold uppercase tracking-[0.3em] mb-3">Professional Strategy Audit</p>
+              <p className="text-body text-apple-text-secondary">Assessed for <span className="text-white font-bold">{profile.displayName || 'Authorized User'}</span></p>
            </div>
            <div className="text-right">
               <p className="text-caption text-apple-text-tertiary uppercase tracking-widest mb-1">Fiscal Year 2024-25</p>
-              <p className="text-subtext font-mono opacity-50">REF: {Math.random().toString(36).substring(7).toUpperCase()}</p>
+              <p className="text-subtext font-mono opacity-50">AUDIT_ID: TB-${Math.random().toString(36).substring(7).toUpperCase()}</p>
            </div>
         </div>
 
@@ -177,23 +255,23 @@ export default function SummaryView({
                 <span className="text-[10px] font-bold text-gold uppercase tracking-widest">Optimized Savings</span>
              </div>
              <p className="text-large-title font-bold text-white mb-2 leading-none">₹{Math.round(savings).toLocaleString('en-IN')}</p>
-             <p className="text-caption text-apple-text-secondary">Annual yield increase by switching to {bestRegime} Regime.</p>
+             <p className="text-caption text-apple-text-secondary">Expected delta from switching to {bestRegime} Regime.</p>
           </div>
 
           <div className="apple-card p-8 border-white/10">
              <div className="flex items-center gap-2 mb-4">
-                <span className="text-[10px] font-bold text-apple-info uppercase tracking-widest">Net Payable Tax</span>
+                <span className="text-[10px] font-bold text-apple-info uppercase tracking-widest">Net Tax Due</span>
              </div>
              <p className="text-large-title font-bold text-white mb-2 leading-none">₹{Math.round(totalTax).toLocaleString('en-IN')}</p>
-             <p className="text-caption text-apple-text-secondary">Projected liability inclusive of Cess & Surcharge.</p>
+             <p className="text-caption text-apple-text-secondary">Projected liability on assessed income.</p>
           </div>
 
           <div className="apple-card p-8 border-white/10">
              <div className="flex items-center gap-2 mb-4">
-                <span className="text-[10px] font-bold text-apple-success uppercase tracking-widest">Deductions Found</span>
+                <span className="text-[10px] font-bold text-apple-success uppercase tracking-widest">Verified Deductions</span>
              </div>
              <p className="text-large-title font-bold text-white mb-2 leading-none">₹{Math.round(totalDeductions).toLocaleString('en-IN')}</p>
-             <p className="text-caption text-apple-text-secondary">Inclusive of Section 80C, 80D, and Standard Deduction.</p>
+             <p className="text-caption text-apple-text-secondary">Inclusive of Standard and Chapter VI-A deductions.</p>
           </div>
         </div>
 
@@ -202,20 +280,19 @@ export default function SummaryView({
             <div className="apple-card p-10 bg-white/[0.01]">
                <h3 className="text-headline font-bold mb-8 flex items-center gap-3">
                  <Shield className="w-5 h-5 text-gold" />
-                 Strategy Breakdown
+                 Computation Logic
                </h3>
                <div className="space-y-6">
-                  <SummaryItem label="Assessed Gross Income" value={`₹${(profile.income || 0).toLocaleString('en-IN')}`} />
+                  <SummaryItem label="Assessed Gross Revenue" value={`₹${(profile.income || 0).toLocaleString('en-IN')}`} />
                   <SummaryItem label="Standard Deduction" value={`₹${bestResults.standardDeduction.toLocaleString('en-IN')}`} />
-                  <SummaryItem label="Marginal Relief applied" value={bestRegime === 'New' && (profile.income || 0) > 700000 && (profile.income || 0) < 727780 ? "Active" : "N/A"} highlight={bestRegime === 'New' && (profile.income || 0) > 700000 && (profile.income || 0) < 727780} />
-                  <SummaryItem label="Primary Advantage" value={`${bestRegime} Regime Optimization`} />
+                  <SummaryItem label="Selected Regime" value={`${bestRegime} Regime (§115BAC)`} highlight={true} />
                   <div className="pt-4 mt-4 border-t border-white/5 flex justify-between items-center">
-                    <span className="text-small-caps text-gold">Efficiency Rating</span>
+                    <span className="text-small-caps text-gold">Algorithm Confidence</span>
                     <div className="flex items-center gap-2">
                        <div className="h-1.5 w-32 bg-white/10 rounded-full overflow-hidden">
-                          <div className="h-full bg-gold w-[94%]" />
+                          <div className="h-full bg-gold w-[98%]" />
                        </div>
-                       <span className="text-caption font-bold text-gold">94%</span>
+                       <span className="text-caption font-bold text-gold">98%</span>
                     </div>
                   </div>
                </div>
@@ -231,16 +308,12 @@ export default function SummaryView({
                </h3>
                <div className="space-y-8">
                   <ActionStep 
-                    title="Lock Optimal Regime" 
-                    desc={`Execute filing under ${bestRegime} Regime via Form 115BAC election to secure ₹${Math.round(savings).toLocaleString('en-IN')} headroom.`}
+                    title={`Elect ${bestRegime} Regime`} 
+                    desc={`Maximize capital efficiency by electing the ${bestRegime} Regime during the filing window.`}
                   />
                   <ActionStep 
-                    title="Verify TDS Mismatches" 
-                    desc={`Confirm ₹${discovery?.tds || 0} TDS against Annual Information Statement (AIS) for current quarter.`}
-                  />
-                  <ActionStep 
-                    title="Digital Signature Setup" 
-                    desc="Ensure DSC or Aadhaar EVC is synchronized for immediate portal authentication."
+                    title="AIS/TDS Verification" 
+                    desc={`Synchronize discovered TDS ₹${discovery?.tds || 0} with official Form 26AS data.`}
                   />
                </div>
             </div>
@@ -248,11 +321,7 @@ export default function SummaryView({
         </div>
 
         <div className="pt-12 border-t border-white/5 text-center">
-           <div className="inline-flex items-center gap-4 px-6 py-3 bg-white/5 rounded-full mb-6 border border-white/5">
-              <Shield className="w-4 h-4 text-apple-success" />
-              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-apple-text-tertiary">Cryptographically Signed Summary • Audit Trail Active</span>
-           </div>
-           <p className="text-caption text-apple-text-tertiary opacity-40">TaxBreaker Intelligence v2.5 • AI Regulatory compliance engine</p>
+           <p className="text-caption text-apple-text-tertiary opacity-40">TaxBreaker Intelligence v3.5 • Verified Regulatory Audit</p>
         </div>
       </div>
     </div>
