@@ -1,20 +1,63 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# 🚀 TaxBreaker
 
-# Run and deploy your AI Studio app
+AI-powered mobile app to simplify Indian income tax for salaried users (FY 2024-25).
 
-This contains everything you need to run your app locally.
+---
 
-View your app in AI Studio: https://ai.studio/apps/09487fe5-15d9-48c4-8386-edf4601bc570
+## ✨ Features
 
-## Run Locally
+- Upload documents (Form 16, salary slips)
+- AI tax analysis (Gemini)
+- Tax score, savings ₹, deductions
+- Old vs New regime comparison
+- Step-by-step tax strategy
+- 80C investment tracker
+- Filing readiness checklist
+- AI assistant (advisor-style)
+- Export PDF summary
+- Local storage (privacy-first)
 
-**Prerequisites:**  Node.js
+---
 
+## 🧠 Core Idea
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Convert tax data into:
+- Clear insights  
+- Actionable steps  
+- Better decisions  
+
+---
+
+## 🛠 Tech Stack
+
+- React Native (Expo)
+- TypeScript
+- Gemini AI (1.5 Flash)
+- Zustand
+- AsyncStorage
+- Expo APIs
+
+---
+
+## 🔄 Data Flow
+Upload → Extract → Analyze → TaxResult → Strategy → UI → Chat / PDF
+
+---
+
+## 🔐 Privacy
+
+- Data stored on device  
+- No sharing  
+- User can delete anytime  
+
+---
+
+## ⚠️ Disclaimer
+
+AI-generated insights. Consult a CA before making tax decisions.
+
+---
+
+## ⭐
+
+Star the repo if useful.
