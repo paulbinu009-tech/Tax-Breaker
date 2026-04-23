@@ -1,6 +1,20 @@
 import * as React from 'react';
 import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove, deleteDoc } from 'firebase/firestore';
+import { 
+  doc, 
+  getDoc, 
+  setDoc, 
+  updateDoc, 
+  arrayUnion, 
+  arrayRemove, 
+  deleteDoc,
+  collection,
+  onSnapshot,
+  query,
+  where,
+  orderBy,
+  addDoc
+} from 'firebase/firestore';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Shield, 
@@ -47,63 +61,119 @@ export default function App() {
   const [user, setUser] = React.useState<User | null>(null);
   const [profile, setProfile] = React.useState<UserProfile | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [appError, setAppError] = React.useState<string | null>(null);
   const [isOnline, setIsOnline] = React.useState(navigator.onLine);
   const [currentView, setCurrentView] = React.useState<'landing' | 'onboarding' | 'dashboard' | 'vault' | 'simulator' | 'profile' | 'privacy' | 'terms' | 'guide' | 'summary'>('landing');
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const [isAssistantOpen, setIsAssistantOpen] = React.useState(false);
   const [discovery, setDiscovery] = React.useState<TaxAnalysisResult | null>(null);
+  const [activeDocumentId, setActiveDocumentId] = React.useState<string | null>(null);
+  const [documents, setDocuments] = React.useState<TaxDocument[]>([]);
+  const docsUnsubscribeRef = React.useRef<(() => void) | null>(null);
+  
   const [hasConsented, setHasConsented] = React.useState(() => {
     return localStorage.getItem('taxbreaker_consent') === 'true';
   });
 
   React.useEffect(() => {
-    const fetchConfig = async () => {
+    let timeoutId: any;
+    let isMounted = true;
+
+    const initializeProtocol = async () => {
+      // 1. Fetch Strategic Configuration
       try {
         const res = await fetch('/api/config');
-        if (res.ok) {
+        if (res.ok && isMounted) {
           const data = await res.json();
           updateTaxRules(data);
           console.log("Strategic config synchronized:", data.lastUpdated);
         }
       } catch (err) {
-        console.error("Configuration sync failed:", err);
+        console.warn("Configuration sync delayed. Using base rules.", err);
       }
-    };
-    fetchConfig();
 
-    const unsubscribe = onAuthStateChanged(auth, async (u) => {
-      setUser(u);
-      if (u) {
-        const userDoc = await getDoc(doc(db, 'users', u.uid));
-        if (userDoc.exists()) {
-          const data = userDoc.data() as UserProfile;
-          setProfile(data);
-          if (data.onboardingComplete) {
-            setCurrentView('dashboard');
+      // 2. Setup Auth Listener
+      const unsubscribe = onAuthStateChanged(auth, async (u) => {
+        if (!isMounted) return;
+        try {
+          setUser(u);
+          if (u) {
+            const userDoc = await getDoc(doc(db, 'users', u.uid));
+            if (userDoc.exists()) {
+              const data = userDoc.data() as UserProfile;
+              setProfile(data);
+              if (data.lastAnalysis) {
+                setDiscovery(data.lastAnalysis);
+              }
+              if (data.onboardingComplete) {
+                setCurrentView('dashboard');
+              } else {
+                setCurrentView('onboarding');
+              }
+            } else {
+              // Initialize empty profile
+              const newProfile: UserProfile = {
+                uid: u.uid,
+                email: u.email || '',
+                displayName: u.displayName || '',
+                onboardingComplete: false,
+                goals: [],
+                taxScore: 0,
+                completedStepIds: []
+              };
+              await setDoc(doc(db, 'users', u.uid), newProfile);
+              setProfile(newProfile);
+              setCurrentView('onboarding');
+            }
+
+            // Listen to documents
+            if (docsUnsubscribeRef.current) {
+              docsUnsubscribeRef.current();
+            }
+
+            const docsQuery = query(
+              collection(db, 'users', u.uid, 'documents'),
+              orderBy('createdAt', 'desc')
+            );
+            docsUnsubscribeRef.current = onSnapshot(docsQuery, (snapshot) => {
+              if (isMounted) {
+                const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as TaxDocument));
+                setDocuments(docs);
+              }
+            }, (err) => {
+              console.error("Documents sync error:", err);
+            });
           } else {
-            setCurrentView('onboarding');
+            setProfile(null);
+            setCurrentView('landing');
+            if (docsUnsubscribeRef.current) {
+              docsUnsubscribeRef.current();
+              docsUnsubscribeRef.current = null;
+            }
           }
-        } else {
-          // Initialize empty profile
-          const newProfile: UserProfile = {
-            uid: u.uid,
-            email: u.email || '',
-            displayName: u.displayName || '',
-            onboardingComplete: false,
-            goals: [],
-            taxScore: 0,
-            completedStepIds: []
-          };
-          await setDoc(doc(db, 'users', u.uid), newProfile);
-          setProfile(newProfile);
-          setCurrentView('onboarding');
+        } catch (err) {
+          console.error("Auth initialization error:", err);
+          setAppError("System initialization failed. Our security protocols may be blocked or the network is unstable.");
+        } finally {
+          if (isMounted) {
+            setLoading(false);
+            if (timeoutId) clearTimeout(timeoutId);
+          }
         }
-      } else {
-        setProfile(null);
-        setCurrentView('landing');
+      });
+
+      return unsubscribe;
+    };
+
+    // Global load timeout
+    timeoutId = setTimeout(() => {
+      if (loading && isMounted) {
+        setAppError("The protocol is taking longer than expected to synchronize. Please verify your connection.");
+        setLoading(false);
       }
-      setLoading(false);
-    });
+    }, 15000);
+
+    const authUnsubscribePromise = initializeProtocol();
 
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -112,9 +182,14 @@ export default function App() {
     window.addEventListener('offline', handleOffline);
 
     return () => {
-      unsubscribe();
+      isMounted = false;
+      authUnsubscribePromise.then(unsub => unsub && unsub());
+      if (docsUnsubscribeRef.current) {
+        docsUnsubscribeRef.current();
+      }
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, []);
 
@@ -145,6 +220,42 @@ export default function App() {
     });
   };
 
+  const handleUpdateProfile = async (updates: Partial<UserProfile>) => {
+    if (!profile || !user) return;
+    const updated = { ...profile, ...updates };
+    setProfile(updated);
+    await updateDoc(doc(db, 'users', user.uid), updates as any);
+  };
+
+  const handleDiscovery = async (result: TaxAnalysisResult) => {
+    setDiscovery(result);
+    // Persist to global profile as well
+    if (profile) {
+      await handleUpdateProfile({ lastAnalysis: result });
+    }
+  };
+
+  const handleDocumentSelect = (doc: TaxDocument) => {
+    if (doc.analysis) {
+      setDiscovery(doc.analysis);
+      setActiveDocumentId(doc.id);
+      setCurrentView('summary');
+    }
+  };
+
+  const handleUpdateAnalysis = async (updatedAnalysis: TaxAnalysisResult) => {
+    setDiscovery(updatedAnalysis);
+    if (activeDocumentId && user) {
+      await updateDoc(doc(db, 'users', user.uid, 'documents', activeDocumentId), {
+        analysis: updatedAnalysis
+      });
+    }
+    // Also update profile for consistency
+    if (profile) {
+      await handleUpdateProfile({ lastAnalysis: updatedAnalysis });
+    }
+  };
+
   const handleLogout = () => {
     signOut(auth);
     setMobileMenuOpen(false);
@@ -171,12 +282,35 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center bg-apple-black">
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-apple-black">
         <motion.div 
           animate={{ scale: [1, 1.1, 1], rotate: [0, 180, 360] }}
-          transition={{ duration: 2, repeat: Infinity }}
-          className="w-12 h-12 border-2 border-gold rounded-xl"
-        />
+          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+          className="w-16 h-16 border-2 border-gold rounded-2xl mb-8 relative"
+        >
+          <div className="absolute inset-0 bg-gold/5 blur-xl animate-pulse" />
+        </motion.div>
+        <p className="text-subtext font-mono text-gold/60 uppercase tracking-[0.3em] animate-pulse">Initializing Strategic Protocols</p>
+      </div>
+    );
+  }
+
+  if (appError) {
+    return (
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-apple-black p-8 text-center">
+        <div className="w-20 h-20 bg-apple-error/10 rounded-full flex items-center justify-center mb-10 border border-apple-error/20">
+          <AlertCircle className="w-10 h-10 text-apple-error" />
+        </div>
+        <h1 className="text-title font-bold text-white mb-4">System Disruption</h1>
+        <p className="text-body text-apple-text-tertiary max-w-sm mb-12">
+          {appError}
+        </p>
+        <button 
+          onClick={() => window.location.reload()}
+          className="premium-btn-primary"
+        >
+          Re-initialize System
+        </button>
       </div>
     );
   }
@@ -331,12 +465,19 @@ export default function App() {
                 isOnline={isOnline} 
                 onOpenSummary={() => setCurrentView('summary')}
                 onOpenGuide={() => setCurrentView('guide')}
+                onUpdateProfile={handleUpdateProfile}
               />
             </motion.div>
           )}
           {currentView === 'vault' && profile && (
             <motion.div key="vault" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <VaultView userId={profile.uid} onDiscover={(result) => setDiscovery(result)} isOnline={isOnline} />
+              <VaultView 
+                userId={profile.uid} 
+                documents={documents}
+                onDiscover={handleDiscovery} 
+                onSelect={handleDocumentSelect}
+                isOnline={isOnline} 
+              />
             </motion.div>
           )}
           {currentView === 'simulator' && profile && (
@@ -365,7 +506,12 @@ export default function App() {
           )}
           {currentView === 'summary' && profile && (
             <motion.div key="summary" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <SummaryView profile={profile} discovery={discovery?.extractedValues || null} onBack={() => setCurrentView('dashboard')} />
+              <SummaryView 
+                profile={profile} 
+                analysis={discovery} 
+                onBack={() => setCurrentView('dashboard')} 
+                onUpdateAnalysis={handleUpdateAnalysis}
+              />
             </motion.div>
           )}
         </AnimatePresence>
@@ -687,28 +833,51 @@ function DashboardView({
   discovery: fullDiscovery, 
   isOnline,
   onOpenSummary,
-  onOpenGuide
+  onOpenGuide,
+  onUpdateProfile
 }: { 
   profile: UserProfile, 
   discovery: TaxAnalysisResult | null, 
   isOnline: boolean,
   onOpenSummary: () => void,
-  onOpenGuide: () => void
+  onOpenGuide: () => void,
+  onUpdateProfile: (updates: Partial<UserProfile>) => Promise<void>
 }) {
-  const discovery = fullDiscovery?.extractedValues;
+  const discoveryValues = fullDiscovery?.extractedValues;
+  const deductions = profile.deductions || {};
+
+  // Merge discovery and manually entered profile deductions
+  // Manual entries in profile.deductions take precedence
+  const deductionsData = {
+    section80C: deductions.section80C ?? discoveryValues?.section80C ?? 0,
+    section80D: deductions.section80D ?? discoveryValues?.section80D ?? 0,
+    section80CCD1B: deductions.section80CCD1B ?? discoveryValues?.nps ?? 0,
+    section24: deductions.section24 ?? discoveryValues?.section24 ?? 0,
+    hra: deductions.hra ?? discoveryValues?.hra ?? 0,
+  };
+
   // Logic for dynamic alerts
-  const show80CWarning = discovery && (discovery.section80C || 0) < 150000;
-  const showTDSWarning = discovery && (discovery.tds || 0) > 0;
+  const show80CWarning = deductionsData.section80C < 150000;
+  const showTDSWarning = (discoveryValues?.tds || 0) > 0;
   
-  const remaining80C = 150000 - (discovery?.section80C || 0);
+  const remaining80C = Math.max(0, 150000 - deductionsData.section80C);
 
   // Dynamic advice
-  const oldResult = calculateTax(profile.income || 0, 'old', discovery || {});
-  const newResult = calculateTax(profile.income || 0, 'new', discovery || {});
+  const oldResult = calculateTax(profile.income || 0, 'old', deductionsData);
+  const newResult = calculateTax(profile.income || 0, 'new', deductionsData);
   const savings = Math.round(Math.abs(oldResult.totalTax - newResult.totalTax));
   const betterRegime = oldResult.totalTax < newResult.totalTax ? "Old" : "New";
   const worseRegime = betterRegime === "Old" ? "New" : "Old";
   const sectionCode = betterRegime === "New" ? "§115BAC" : "Traditional";
+
+  const handleDeductionChange = (field: keyof TaxDeductions, value: number) => {
+    onUpdateProfile({
+      deductions: {
+        ...deductions,
+        [field]: value
+      }
+    });
+  };
 
   // Readiness checklist logic
   const completedSteps = profile.completedFilingStepIds || [];
@@ -737,7 +906,7 @@ function DashboardView({
             </p>
           </motion.div>
         )}
-        {discovery && (show80CWarning || showTDSWarning) && (
+        {discoveryValues && (show80CWarning || showTDSWarning) && (
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
@@ -752,7 +921,7 @@ function DashboardView({
                 <p className="text-apple-text-tertiary text-subtext">
                   {show80CWarning 
                     ? `You have ₹${remaining80C.toLocaleString('en-IN')} remaining in your 80C threshold.`
-                    : `TDS of ₹${discovery?.tds?.toLocaleString('en-IN')} detected. Prepare for July 31 filing.`}
+                    : `TDS of ₹${discoveryValues?.tds?.toLocaleString('en-IN')} detected. Prepare for July 31 filing.`}
                 </p>
               </div>
             </div>
@@ -767,7 +936,7 @@ function DashboardView({
         <div>
           <span className="small-caps mb-4 block">Portfolio Overview</span>
           <h1 className="text-title md:text-large-title font-bold tracking-tight">
-            Welcome, <span className="text-gold">{profile.displayName?.split(' ')[0]}</span>
+            Welcome, <span className="text-gold">{profile.displayName?.split(' ')[0] || 'Strategist'}</span>
           </h1>
         </div>
         <div className="flex gap-8 items-center">
@@ -807,19 +976,45 @@ function DashboardView({
           <WealthTips profile={profile} discovery={fullDiscovery} />
 
           <div>
+            <SectionHeader title="Strategic Deduction Control" icon={<TrendingUp className="w-4 h-4" />} />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              <DashboardField 
+                label="Section 80C" 
+                value={deductionsData.section80C} 
+                onChange={(v) => handleDeductionChange('section80C', v)}
+                max={150000}
+                description="PPF, ELSS, Insurance..."
+              />
+              <DashboardField 
+                label="Section 80D" 
+                value={deductionsData.section80D} 
+                onChange={(v) => handleDeductionChange('section80D', v)}
+                description="Health Insurance..."
+              />
+              <DashboardField 
+                label="NPS (80CCD)" 
+                value={deductionsData.section80CCD1B} 
+                onChange={(v) => handleDeductionChange('section80CCD1B', v)}
+                max={50000}
+                description="Voluntary Pension..."
+              />
+            </div>
+          </div>
+
+          <div>
             <SectionHeader title="Strategic Timeline" icon={<TrendingUp className="w-4 h-4" />} />
             <div className="apple-card p-0 divide-y divide-white/5">
               <TimelineItem 
                 date="MAR 31" 
                 title="Investment Deadline" 
-                status={discovery ? (show80CWarning ? "warning" : "success") : "pending"} 
-                sub={discovery ? (show80CWarning ? `₹${remaining80C.toLocaleString('en-IN')} headroom available` : "80C Threshold Maximized") : "Awaiting document analysis"} 
+                status={discoveryValues ? (show80CWarning ? "warning" : "success") : "pending"} 
+                sub={discoveryValues ? (show80CWarning ? `₹${remaining80C.toLocaleString('en-IN')} headroom available` : "80C Threshold Maximized") : "Awaiting document analysis"} 
               />
               <TimelineItem 
                 date="JUL 31" 
                 title="ITR Filing Deadline" 
-                status={discovery ? (showTDSWarning ? "pending" : "success") : "pending"} 
-                sub={discovery ? (showTDSWarning ? `Filing ready for ₹${discovery?.tds?.toLocaleString('en-IN')} TDS` : "Profile optimized for filing") : "Synchronize Vault to track"} 
+                status={discoveryValues ? (showTDSWarning ? "pending" : "success") : "pending"} 
+                sub={discoveryValues ? (showTDSWarning ? `Filing ready for ₹${discoveryValues?.tds?.toLocaleString('en-IN')} TDS` : "Profile optimized for filing") : "Synchronize Vault to track"} 
               />
             </div>
           </div>
@@ -846,6 +1041,44 @@ function DashboardView({
   );
 }
 
+function DashboardField({ 
+  label, 
+  value, 
+  onChange, 
+  max, 
+  description 
+}: { 
+  label: string, 
+  value: number, 
+  onChange: (v: number) => void,
+  max?: number,
+  description: string
+}) {
+  return (
+    <div className="apple-card p-6 space-y-4 hover:border-gold/20 transition-all">
+      <div className="flex justify-between items-center">
+        <label className="text-[10px] font-bold text-apple-text-tertiary uppercase tracking-widest">{label}</label>
+        {max && <span className="text-[9px] font-mono text-gold/60">Limit: ₹{max/1000}k</span>}
+      </div>
+      <div className="relative">
+        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gold font-bold text-body">₹</span>
+        <input 
+          type="number" 
+          value={value || ''} 
+          onChange={(e) => {
+            const val = Number(e.target.value);
+            if (val < 0) onChange(0);
+            else if (max && val > max) onChange(max);
+            else onChange(val);
+          }}
+          className="w-full bg-apple-elevated border border-white/5 h-12 rounded-xl pl-10 pr-4 outline-none text-body font-bold focus:border-gold/30 transition-all"
+        />
+      </div>
+      <p className="text-[9px] text-apple-text-tertiary italic">{description}</p>
+    </div>
+  );
+}
+
 function TimelineItem({ date, title, status, sub }: { date: string, title: string, status: 'pending' | 'success' | 'warning', sub: string }) {
   return (
     <div className="p-8 flex items-center gap-8 group hover:bg-apple-elevated transition-colors duration-200">
@@ -865,7 +1098,19 @@ function TimelineItem({ date, title, status, sub }: { date: string, title: strin
   );
 }
 
-function VaultView({ userId, onDiscover, isOnline }: { userId: string, onDiscover: (result: TaxAnalysisResult) => void, isOnline: boolean }) {
+function VaultView({ 
+  userId, 
+  documents,
+  onDiscover, 
+  onSelect,
+  isOnline 
+}: { 
+  userId: string, 
+  documents: TaxDocument[],
+  onDiscover: (result: TaxAnalysisResult) => void, 
+  onSelect: (doc: TaxDocument) => void,
+  isOnline: boolean 
+}) {
   const [analyzing, setAnalyzing] = React.useState(false);
   const [result, setResult] = React.useState<TaxAnalysisResult | null>(null);
   const [stagedFile, setStagedFile] = React.useState<File | null>(null);
@@ -909,12 +1154,23 @@ function VaultView({ userId, onDiscover, isOnline }: { userId: string, onDiscove
     setAnalysisError(null);
     setPermissionDeniedMessage(null);
     
-    // Use real analysis with Gemini
     const reader = new FileReader();
     reader.onload = async () => {
       try {
         const text = reader.result as string;
         const analysis = await analyzeTaxDocuments({ uid: userId }, [text]);
+        
+        // Save to Firestore
+        const docRef = await addDoc(collection(db, 'users', userId, 'documents'), {
+          userId,
+          name: stagedFile.name,
+          type: stagedFile.type,
+          size: stagedFile.size,
+          status: 'parsed',
+          createdAt: Date.now(),
+          analysis: analysis
+        });
+
         setResult(analysis);
         onDiscover(analysis);
         setAnalyzing(false);
@@ -997,11 +1253,31 @@ function VaultView({ userId, onDiscover, isOnline }: { userId: string, onDiscove
       </AnimatePresence>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-16">
-        <div className="lg:col-span-1 space-y-4">
-           <FilterBtn active icon={<FileText className="w-4 h-4" />}>All Assets</FilterBtn>
-           <FilterBtn icon={<TrendingUp className="w-4 h-4" />}>Investments</FilterBtn>
-           <FilterBtn icon={<Zap className="w-4 h-4" />}>Strategy</FilterBtn>
-        </div>
+         <div className="lg:col-span-1 space-y-8">
+            <div className="space-y-4">
+              <FilterBtn active icon={<FileText className="w-4 h-4" />}>All Assets</FilterBtn>
+              <FilterBtn icon={<TrendingUp className="w-4 h-4" />}>Investments</FilterBtn>
+              <FilterBtn icon={<Zap className="w-4 h-4" />}>Strategy</FilterBtn>
+            </div>
+
+            <div className="apple-card p-6 bg-gold/[0.02] border-gold/10 hidden lg:block">
+              <p className="text-[10px] font-bold text-gold uppercase tracking-[0.2em] mb-4">Mobile Connectivity</p>
+              <div className="aspect-square bg-white p-2 rounded-xl mb-4 overflow-hidden">
+                <img 
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent('https://ais-pre-2z2teuckfhcelspwtt72vb-602455049138.asia-southeast1.run.app')}`} 
+                  alt="Mobile Access QR"
+                  className="w-full h-full object-contain"
+                />
+              </div>
+              <p className="text-caption text-apple-text-secondary leading-relaxed mb-3">
+                Scan to sync this audit directly to your mobile device.
+              </p>
+              <div className="flex items-center gap-2 text-gold">
+                <Shield className="w-3 h-3" />
+                <span className="text-[9px] font-bold uppercase tracking-widest">Secure Link</span>
+              </div>
+            </div>
+         </div>
         <div className="lg:col-span-3">
           <div className="apple-card mb-12 py-32 text-center border-dashed border-white/10 hover:bg-apple-elevated transition-all duration-500">
              <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" accept=".txt,.pdf,.docx" />
@@ -1132,16 +1408,31 @@ function VaultView({ userId, onDiscover, isOnline }: { userId: string, onDiscove
             )}
           </AnimatePresence>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-             <div className="apple-card flex items-center gap-8 group hover:bg-apple-elevated transition-colors cursor-pointer">
-                <div className="w-14 h-14 bg-apple-elevated rounded-full flex items-center justify-center text-gold">
-                  <FileText className="w-6 h-6" />
+          <div className="space-y-6">
+            <SectionHeader title="Recently Processed Assets" icon={<FileText className="w-4 h-4" />} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {documents.length > 0 ? documents.map((doc) => (
+                <div 
+                  key={doc.id} 
+                  onClick={() => onSelect(doc)}
+                  className="apple-card flex items-center gap-8 group hover:bg-apple-elevated transition-colors cursor-pointer border-white/5 active:scale-[0.98]"
+                >
+                   <div className="w-14 h-14 bg-apple-elevated rounded-full flex items-center justify-center text-gold group-hover:bg-gold group-hover:text-black transition-all">
+                     <FileText className="w-6 h-6" />
+                   </div>
+                   <div>
+                      <h4 className="font-bold text-body truncate max-w-[200px]">{doc.name}</h4>
+                      <p className="text-caption text-apple-text-tertiary font-bold uppercase tracking-widest mt-1">
+                        {doc.type.split('/')[1] || 'Document'} • {doc.status === 'parsed' ? 'VERIFIED' : 'PENDING'}
+                      </p>
+                   </div>
                 </div>
-                <div>
-                   <h4 className="font-bold text-body">Paystab_April_2023.pdf</h4>
-                   <p className="text-caption text-apple-text-tertiary font-bold uppercase tracking-widest mt-1">Income Statement • VERIFIED</p>
+              )) : (
+                <div className="apple-card border-dashed border-white/10 text-center bg-transparent py-12">
+                   <p className="text-apple-text-tertiary text-subtext">Secure vault is current. No assets indexed.</p>
                 </div>
-             </div>
+              )}
+            </div>
           </div>
         </div>
       </div>

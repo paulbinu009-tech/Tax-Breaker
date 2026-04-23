@@ -25,21 +25,24 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
   const [isAdvanced, setIsAdvanced] = React.useState(false);
   const [discoveryApplied, setDiscoveryApplied] = React.useState(false);
 
+  // Unified Initial State - prioritizing manual overrides
+  const userDeductions = profile.deductions || {};
+  
   // Core Deduction States
   const [has80C, setHas80C] = React.useState(true);
-  const [s80C, setS80C] = React.useState(0);
+  const [s80C, setS80C] = React.useState(userDeductions.section80C ?? discovery?.section80C ?? 0);
 
-  const [has80D, setHas80D] = React.useState(false);
-  const [s80D, setS80D] = React.useState(0);
+  const [has80D, setHas80D] = React.useState(!!(userDeductions.section80D || discovery?.section80D));
+  const [s80D, setS80D] = React.useState(userDeductions.section80D ?? discovery?.section80D ?? 0);
 
-  const [hasNPS, setHasNPS] = React.useState(false);
-  const [nps, setNps] = React.useState(0);
+  const [hasNPS, setHasNPS] = React.useState(!!(userDeductions.section80CCD1B || discovery?.nps));
+  const [nps, setNps] = React.useState(userDeductions.section80CCD1B ?? discovery?.nps ?? 0);
 
-  const [hasHomeLoan, setHasHomeLoan] = React.useState(false);
-  const [section24, setSection24] = React.useState(0);
+  const [hasHomeLoan, setHasHomeLoan] = React.useState(!!(userDeductions.section24 || discovery?.section24));
+  const [section24, setSection24] = React.useState(userDeductions.section24 ?? discovery?.section24 ?? 0);
 
-  const [hasHRA, setHasHRA] = React.useState(false);
-  const [hra, setHra] = React.useState(0);
+  const [hasHRA, setHasHRA] = React.useState(!!(userDeductions.hra || discovery?.hra));
+  const [hra, setHra] = React.useState(userDeductions.hra ?? discovery?.hra ?? 0);
 
   // Advanced Deduction States
   const [lta, setLta] = React.useState(0);
@@ -97,7 +100,7 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
   const [snapshotName, setSnapshotName] = React.useState("");
 
   const calculateResults = React.useCallback(() => {
-    const deductions = {
+    const deductionsData = {
       section80C: has80C ? s80C : 0,
       section80D: has80D ? s80D : 0,
       section80CCD1B: hasNPS ? nps : 0,
@@ -108,8 +111,8 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
       section80EE: isAdvanced ? s80EE : 0
     };
 
-    const oldResult = calculateTax(income, 'old', deductions);
-    const newResult = calculateTax(income, 'new', deductions);
+    const oldResult = calculateTax(income, 'old', deductionsData);
+    const newResult = calculateTax(income, 'new', deductionsData);
     return { old: oldResult, new: newResult };
   }, [income, has80C, s80C, has80D, s80D, hasNPS, nps, hasHomeLoan, section24, hasHRA, hra, isAdvanced, lta, s80G, s80EE]);
 

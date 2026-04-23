@@ -22,6 +22,8 @@ export interface UserProfile {
   taxScore?: number;
   completedStepIds?: string[];
   completedFilingStepIds?: string[];
+  deductions?: TaxDeductions;
+  lastAnalysis?: TaxAnalysisResult;
 }
 
 export interface FilingStep {
@@ -110,4 +112,5 @@ export interface TaxDocument {
   status: 'pending' | 'processing' | 'parsed' | 'error';
   category?: string;
   createdAt: number;
+  analysis?: TaxAnalysisResult;
 }

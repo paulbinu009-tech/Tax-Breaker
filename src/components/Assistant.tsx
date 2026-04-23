@@ -50,10 +50,14 @@ export default function Assistant({
         parts: [{ text: m.text }]
       }));
       
-      const response = await chatWithAssistant({ ...profile, discovery }, history, userMsg);
-      setMessages(prev => [...prev, { role: 'model', text: response || 'An unexpected interruption occurred in the logic stream.' }]);
+      const response = await chatWithAssistant({ ...profile, analysis: discovery }, history, userMsg);
+      setMessages(prev => [...prev, { role: 'model', text: response }]);
     } catch (error) {
-       setMessages(prev => [...prev, { role: 'model', text: 'Connection to the intelligence core is temporarily suspended.' }]);
+       console.error('[CHAT_UI_ERROR]:', error);
+       setMessages(prev => [...prev, { 
+         role: 'model', 
+         text: `CRITICAL ERROR: ${(error as Error).message}. Intelligence hub synchronization failed. Please retry your query.` 
+       }]);
     } finally {
       setLoading(false);
     }

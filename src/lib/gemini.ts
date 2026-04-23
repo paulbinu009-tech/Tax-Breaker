@@ -4,7 +4,7 @@ import { TaxAnalysisResult } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-export const TAX_MODEL = "gemini-3.1-pro-preview";
+export const TAX_MODEL = "gemini-1.5-pro";
 
 const TAX_RULES_CONTEXT = JSON.stringify(TAX_RULES.FY_2024_25, null, 2);
 
@@ -24,7 +24,13 @@ export async function analyzeTaxDocuments(
     
     Requirements:
     1. Every insight MUST reference specific Indian Tax Law (e.g., Section 80C, 80D, 87A, 115BAC).
-    2. Provide a structured "actionPlan" which is a step-by-step guide.
+    2. Provide a structured "actionPlan". Each item MUST have:
+       - title: Short tactical name.
+       - action: The exact imperative step.
+       - why: Detailed clinical rationale for the move.
+       - priority: "High", "Medium", or "Low" based on savings magnitude.
+       - benefit: Estimated ₹ savings.
+       - law: The specific IT Act section.
     3. Calculate an overall audit risk score (0-100).
     4. EXTRACT KEY FINANCIAL VALUES: If the documents contain specific figures for Salary (Gross), TDS, Section 80C, Section 80D, Section 24 (Housing Loan), HRA, or NPS, extract them accurately into the "extractedValues" object.
     5. Identify missed deductions based on these Indian Tax Rules:
@@ -58,37 +64,50 @@ export async function chatWithAssistant(
   history: { role: 'user' | 'model', parts: { text: string }[] }[],
   message: string
 ) {
-  const chat = ai.chats.create({
-    model: TAX_MODEL,
-    config: {
-      systemInstruction: `You are a RUTHLESS tax strategist specializing in Indian income tax (FY 2024-25).
-      Your goal is to maximize the client's wealth by legally minimizing tax liability to the absolute limit.
-      Tone: Sharp, clinical, and authoritative. NO fluff, NO pleasantries, NO emojis. Talk like a top-tier private wealth advisor.
+  console.log('[GEMINI_CHAT]: Initializing session for model gemini-3-flash-preview...');
+  
+  try {
+    const chat = ai.chats.create({
+      model: "gemini-1.5-flash",
+      config: {
+        systemInstruction: `You are a RUTHLESS tax strategist specializing in Indian income tax (FY 2024-25).
+        Your goal is to maximize the client's wealth by legally minimizing tax liability to the absolute limit.
+        Tone: Sharp, clinical, and authoritative. NO fluff, NO pleasantries, NO emojis. Talk like a top-tier private wealth advisor.
 
-      INDIAN TAX RULES (FY 2024-25) CONTEXT:
-      ${TAX_RULES_CONTEXT}
+        INDIAN TAX RULES (FY 2024-25) CONTEXT:
+        ${TAX_RULES_CONTEXT}
 
-      YOUR ARSENAL (User Profile & Analysis):
-      ${JSON.stringify(userProfile)}
+        YOUR ARSENAL (User Profile & Analysis):
+        ${JSON.stringify(userProfile)}
 
-      RESPONSE RIGIDITY (MANDATORY):
-      1. Direct Answer -> 1 sentence. Hit the point immediately.
-      2. Explanation -> 2 sentences max. Focus on the mechanics of the law (80C, 80D, 87A, 24b, etc.).
-      3. Next Action -> Single clear imperative (e.g., "Invest ₹1.5L in ELSS", "Switch to New Regime").
-      4. Risk Guard -> Mention the audit risk or legal boundary.
+        RESPONSE RIGIDITY (MANDATORY):
+        For every answer, follow this exact structure:
+        1. Strategic Verdict: 1-sentence analytical conclusion.
+        2. Protocol: Numbered tactical steps (max 3).
+        3. Legal Basis: Specify relevant Section (e.g., 80C, 80D, 115BAC, etc.).
+        4. Strategic Benefit: Est. benefit in ₹.
+        5. Risk Guard: Audit risk or legal boundary.
 
-      CONSTRAINTS:
-      - Max 75 words per response. Total brevity.
-      - If data is missing (e.g., specific income), state: "INSUFFICIENT DATA: Provide [Value] for a precise answer."
-      - Always use ₹ for amounts.
-      - Never suggest illegal evasion. If a user asks for something illegal, tell them why it's a "tax suicide mission".
+        CONSTRAINTS:
+        - Max 100 words per response. Extreme brevity.
+        - Tone: Clinical, authoritative, zero fluff.
+        - If data missing: "DATA GAP: Provide [Value] for precision."
+        - Always use ₹ for amounts.
+        - End with: "Decision remains with you. Consult a CA before execution."`,
+      },
+      history: history
+    });
 
-      ENDING (MANDATORY):
-      Always end with: "Decision remains with you. Consult a CA before execution."`,
-    },
-    history: history
-  });
+    const response = await chat.sendMessage({ message });
+    
+    if (!response.text) {
+      console.warn('[GEMINI_WARN]: Empty response text from assistant.');
+      return "Logic loop detected: Assistant failed to produce an actionable response. Please rephrase the technical query.";
+    }
 
-  const response = await chat.sendMessage({ message });
-  return response.text;
+    return response.text;
+  } catch (error) {
+    console.error("[GEMINI_FATAL_CHAT]:", error);
+    throw new Error(`INTELLIGENCE_LAYER_FAILURE: ${(error as Error).message}`);
+  }
 }

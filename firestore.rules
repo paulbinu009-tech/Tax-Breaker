@@ -11,12 +11,20 @@ service cloud.firestore {
       return request.auth != null;
     }
     
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
     }
 
     // User Profile Validation
@@ -29,20 +37,20 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow get: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidUser(request.resource.data);
-      allow update: if isOwner(userId) && isValidUser(request.resource.data)
-        && request.resource.data.uid == resource.data.uid;
+      allow create: if isOwner(userId) && isVerified() && isValidUser(incoming());
+      allow update: if isOwner(userId) && isVerified() && isValidUser(incoming())
+        && incoming().uid == resource.data.uid;
 
       // Sub-collections
       match /documents/{docId} {
         allow list: if isOwner(userId);
         allow get: if isOwner(userId);
-        allow create: if isOwner(userId) 
-          && request.resource.data.userId == userId
-          && request.resource.data.name is string && request.resource.data.name.size() <= 255;
-        allow update: if isOwner(userId) 
-          && request.resource.data.userId == userId;
-        allow delete: if isOwner(userId);
+        allow create: if isOwner(userId) && isVerified()
+          && incoming().userId == userId
+          && incoming().name is string && incoming().name.size() <= 255;
+        allow update: if isOwner(userId) && isVerified()
+          && incoming().userId == userId;
+        allow delete: if isOwner(userId) && isVerified();
       }
 
       match /reports/{reportId} {
