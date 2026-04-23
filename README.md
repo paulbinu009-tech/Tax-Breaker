@@ -1,20 +1,65 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# TaxBreaker AI
 
-# Run and deploy your AI Studio app
+A premium, AI-powered tax optimization platform for Indian salaried individuals.  
+Built for accuracy, compliance, and actionable tax savings.
 
-This contains everything you need to run your app locally.
+---
 
-View your app in AI Studio: https://ai.studio/apps/09487fe5-15d9-48c4-8386-edf4601bc570
+## 🚀 Features
 
-## Run Locally
+- 📊 Smart Tax Dashboard (Income, Liability, Savings)
+- 💰 Deduction Optimization (80C, 80D, HRA, 24)
+- 🧠 AI Tax Advisor (law-based, advisor-style responses)
+- 📈 Personalized Tax Strategy (auto-updating)
+- ✅ Filing Readiness Score (PAN, Aadhaar, 26AS checks)
+- 📄 Exportable Tax Audit Report (PDF)
+- 🔐 Privacy-first file handling
 
-**Prerequisites:**  Node.js
+---
 
+## 📱 App Preview
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+![TaxBreaker UI](./Gemini_Generated_Image_tbvpsytbvpsytbvp.png)
+
+---
+
+## 🧠 AI Capabilities
+
+- Direct, professional tax guidance (not chatbot-style)
+- Law references: 80C, 80D, 87A, 115BAC
+- Personalized recommendations based on user data
+- Strategy generation with clear steps and savings impact
+
+---
+
+## 🛠️ Tech Stack
+
+- React / TypeScript
+- Gemini API (AI Assistant)
+- State-driven tax engine
+- PDF export system
+
+---
+
+## ⚙️ Core Modules
+
+- Tax Engine (calculation + comparison)
+- Strategy Engine (optimization logic)
+- AI Assistant (advisor-style responses)
+- Vault (investments + deductions)
+- Audit & Reporting
+
+---
+
+## 📌 Goal
+
+Make tax optimization simple, compliant, and actionable—without needing constant manual consultation.
+
+---
+
+## ⚠️ Disclaimer
+
+This tool provides guidance based on available data.  
+Always verify with a Chartered Accountant before filing.
+
+---
