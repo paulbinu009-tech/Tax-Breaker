@@ -33,7 +33,7 @@ export default function ReadinessScore({ completedStepIds, onOpenGuide }: Readin
   return (
     <div 
       onClick={onOpenGuide}
-      className="apple-card-elevated group cursor-pointer hover:border-gold/30 transition-all duration-500"
+      className="apple-card-elevated group cursor-pointer hover:border-teal/30 transition-all duration-500"
     >
       <div className="p-8 space-y-8">
         <div className="flex justify-between items-start">
@@ -50,7 +50,7 @@ export default function ReadinessScore({ completedStepIds, onOpenGuide }: Readin
               </div>
             </div>
           </div>
-          <div className="w-12 h-12 bg-apple-elevated rounded-2xl flex items-center justify-center text-gold/40 group-hover:text-gold transition-colors">
+          <div className="w-12 h-12 bg-apple-elevated rounded-2xl flex items-center justify-center text-teal/40 group-hover:text-teal transition-colors">
             <Shield className="w-6 h-6" />
           </div>
         </div>
@@ -79,7 +79,7 @@ export default function ReadinessScore({ completedStepIds, onOpenGuide }: Readin
 
         <div className="pt-8 border-t border-white/5 flex items-center justify-between">
            <span className="text-[10px] font-bold text-apple-text-tertiary uppercase tracking-widest">Mandatory Compliance Path</span>
-           <span className="text-gold text-[10px] font-bold uppercase tracking-widest group-hover:translate-x-1 transition-transform inline-flex items-center gap-2">
+           <span className="text-teal text-[10px] font-bold uppercase tracking-widest group-hover:translate-x-1 transition-transform inline-flex items-center gap-2">
              Configure Protocol <Shield className="w-3 h-3" />
            </span>
         </div>

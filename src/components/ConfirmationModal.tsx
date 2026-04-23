@@ -46,7 +46,7 @@ export default function ConfirmationModal({
                 "w-16 h-16 rounded-full flex items-center justify-center mb-8",
                 variant === 'danger' ? "bg-apple-error/10 text-apple-error" : 
                 variant === 'warning' ? "bg-apple-warning/10 text-apple-warning" : 
-                "bg-gold/10 text-gold"
+                "bg-teal/10 text-teal"
               )}>
                 <AlertTriangle size={32} />
               </div>
@@ -65,7 +65,7 @@ export default function ConfirmationModal({
                   className={cn(
                     "h-14 rounded-2xl font-bold transition-all duration-300",
                     variant === 'danger' ? "bg-apple-error text-white hover:bg-apple-error/90" : 
-                    "bg-gold text-black hover:shadow-[0_0_20px_rgba(212,175,55,0.3)]"
+                    "bg-teal text-black hover:shadow-[0_0_20px_rgba(0,128,128,0.3)]"
                   )}
                 >
                   {confirmText}

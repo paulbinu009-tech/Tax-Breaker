@@ -143,7 +143,7 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
           <div className="flex flex-col md:flex-row items-center justify-between gap-8">
             <div className="flex items-center gap-8">
                <div className="w-16 h-16 bg-apple-elevated rounded-2xl flex items-center justify-center border border-white/5">
-                 <Calculator className="w-8 h-8 text-gold" />
+                 <Calculator className="w-8 h-8 text-teal" />
                </div>
                <div>
                  <p className="small-caps text-apple-text-tertiary mb-1">Live Optimal Regime</p>
@@ -175,7 +175,7 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
             exit={{ height: 0, opacity: 0 }}
             className="mb-12 overflow-hidden"
           >
-            <div className="bg-gold p-8 rounded-[32px] flex flex-col md:flex-row items-center justify-between gap-8">
+            <div className="bg-teal p-8 rounded-[32px] flex flex-col md:flex-row items-center justify-between gap-8">
               <div className="flex items-center gap-6">
                  <div className="w-14 h-14 bg-black/10 rounded-full flex items-center justify-center">
                     <Zap className="w-6 h-6 text-black" />
@@ -208,7 +208,7 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
         <SectionHeader title="Simulation Engine" icon={<Calculator className="w-4 h-4" />} />
         <div className="flex items-center gap-4 bg-apple-card px-6 py-3 rounded-2xl border border-white/5">
           <span className="small-caps text-apple-text-tertiary">Standard Deduction</span>
-          <span className="text-body font-bold text-gold">Applied</span>
+          <span className="text-body font-bold text-teal">Applied</span>
         </div>
       </div>
 
@@ -234,8 +234,8 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
           <section className="space-y-8">
             <span className="small-caps opacity-50 block">Income Baseline</span>
             <SimulatorField 
-              label="Annual Gross Income (₹)"
-              description="Your total salary/earnings before any taxes or deductions."
+              label="Annual Gross Income"
+              description="Your total annual package including basic, allowances, and bonuses."
               value={income}
               onChange={setIncome}
               placeholder="e.g. 15,00,000"
@@ -259,12 +259,13 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
                   {has80C && (
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
                       <SimulatorField 
-                        label="Section 80C Total" 
+                        label="Section 80C Investments" 
                         value={s80C} 
                         onChange={setS80C} 
                         max={TAX_RULES.FY_2024_25.section80C.maxLimit}
                         placeholder="Upto ₹1.5L"
                         error={errors.s80C}
+                        description="Includes EPF, PPF, ELSS, and Life Insurance premiums."
                       />
                     </motion.div>
                   )}
@@ -283,11 +284,12 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
                   {has80D && (
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
                       <SimulatorField 
-                        label="Section 80D Deduction" 
+                        label="Section 80D (Health)" 
                         value={s80D} 
                         onChange={setS80D} 
                         placeholder="e.g. 25,000"
                         error={errors.s80D}
+                        description="Premiums paid for self, spouse, children, or parents."
                       />
                     </motion.div>
                   )}
@@ -306,12 +308,13 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
                   {hasNPS && (
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
                       <SimulatorField 
-                        label="NPS Voluntary Contribution" 
+                        label="NPS Contribution" 
                         value={nps} 
                         onChange={setNps} 
                         max={TAX_RULES.FY_2024_25.section80CCD1B.maxLimit}
                         placeholder="Upto ₹50,000"
                         error={errors.nps}
+                        description="Voluntary contributions under Section 80CCD(1B)."
                       />
                     </motion.div>
                   )}
@@ -330,12 +333,13 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
                   {hasHomeLoan && (
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
                       <SimulatorField 
-                        label="Interest on Housing Loan" 
+                        label="Home Loan Interest" 
                         value={section24} 
                         onChange={setSection24} 
                         max={TAX_RULES.FY_2024_25.section24.maxLimit}
                         placeholder="Upto ₹2L"
                         error={errors.section24}
+                        description="Interest paid on housing loan for self-occupied property."
                       />
                     </motion.div>
                   )}
@@ -354,11 +358,12 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
                   {hasHRA && (
                     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}>
                       <SimulatorField 
-                        label="Exempt HRA Amount" 
+                        label="HRA Exemption" 
                         value={hra} 
                         onChange={setHra} 
                         placeholder="e.g. 1,20,000"
                         error={errors.hra}
+                        description="Estimated House Rent Allowance exempted amount."
                       />
                     </motion.div>
                   )}
@@ -389,23 +394,26 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
                     label="Donations (80G)" 
                     value={s80G} 
                     onChange={setS80G} 
-                    placeholder="Charitable donations"
+                    placeholder="e.g. 10,000"
                     error={errors.s80G}
+                    description={TAX_RULES.FY_2024_25.section80G.description}
                   />
                   <SimulatorField 
-                    label="LTA" 
+                    label="LTA Emoluments" 
                     value={lta} 
                     onChange={setLta} 
-                    placeholder="Leave Travel Allowance"
+                    placeholder="e.g. 45,000"
                     error={errors.lta}
+                    description={TAX_RULES.FY_2024_25.lta.description}
                   />
                   <SimulatorField 
-                    label="80EE / 80EEA" 
+                    label="Section 80EE/EEA" 
                     value={s80EE} 
                     onChange={setS80EE} 
                     max={TAX_RULES.FY_2024_25.section80EE.maxLimit}
-                    placeholder="First home interest"
+                    placeholder="e.g. 50,000"
                     error={errors.s80EE}
+                    description="Additional interest for first-time home buyers."
                   />
                 </div>
               </motion.section>
@@ -420,7 +428,7 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
                 value={snapshotName}
                 onChange={(e) => setSnapshotName(e.target.value)}
                 placeholder="Scenario Name (e.g. 'Optimized')"
-                className="flex-1 bg-apple-elevated border border-white/5 h-14 rounded-xl px-6 outline-none focus:border-gold/30 text-subtext font-medium"
+                className="flex-1 bg-apple-elevated border border-white/5 h-14 rounded-xl px-6 outline-none focus:border-teal/30 text-subtext font-medium"
               />
               <button 
                 onClick={saveSnapshot}
@@ -437,10 +445,10 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
         <div className="lg:col-span-7 space-y-16">
            {results ? (
              <div className="flex flex-col gap-10">
-               <div className="bg-apple-card-elevated border border-gold/20 p-10 rounded-[40px] flex flex-col md:flex-row items-center justify-between gap-8 relative overflow-hidden group">
-                  <div className="absolute inset-0 bg-gold/[0.02] opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
+               <div className="bg-apple-card-elevated border border-teal/20 p-10 rounded-[40px] flex flex-col md:flex-row items-center justify-between gap-8 relative overflow-hidden group">
+                  <div className="absolute inset-0 bg-teal/[0.02] opacity-0 group-hover:opacity-100 transition-opacity duration-700" />
                   <div className="relative z-10">
-                    <span className="small-caps text-gold mb-3 block">Optimal Strategy</span>
+                    <span className="small-caps text-teal mb-3 block">Optimal Strategy</span>
                     <h3 className="text-large-title font-medium">
                       {results.old.totalTax < results.new.totalTax ? "Old Regime" : "New Regime"}
                     </h3>
@@ -459,7 +467,7 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
                
                <div className="space-y-12 pt-8">
                  <div className="flex items-center gap-3">
-                   <div className="p-2 bg-gold/10 text-gold rounded-lg">
+                   <div className="p-2 bg-teal/10 text-teal rounded-lg">
                      <TrendingUp className="w-4 h-4" />
                    </div>
                    <h2 className="text-sm font-bold uppercase tracking-[0.2em] text-white">Slab Dynamics Analysis</h2>
@@ -487,7 +495,7 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
            ) : (
              <div className="h-full min-h-[600px] bg-apple-card border border-dashed border-white/10 rounded-[48px] flex flex-col items-center justify-center text-center p-12">
                 <div className="w-24 h-24 bg-apple-elevated border border-white/5 rounded-full flex items-center justify-center mb-10">
-                  <TrendingUp className="w-10 h-10 text-gold/40" />
+                  <TrendingUp className="w-10 h-10 text-teal/40" />
                 </div>
                 <h3 className="text-headline font-bold mb-4">Ready for Analysis</h3>
                 <p className="text-apple-text-tertiary text-body font-normal max-w-sm leading-relaxed">
@@ -523,7 +531,7 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
                     key={i} 
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    className="apple-card p-10 group relative border border-white/5 hover:border-gold/20 transition-all"
+                    className="apple-card p-10 group relative border border-white/5 hover:border-teal/20 transition-all"
                   >
                     <div className="flex justify-between items-start mb-10">
                       <div>
@@ -546,7 +554,7 @@ export default function TaxCalculator({ profile, discovery }: TaxCalculatorProps
                       </div>
                       <div className="text-right">
                         <p className="text-[10px] font-bold text-apple-text-tertiary uppercase tracking-[0.2em] mb-2">Optimal</p>
-                        <p className="text-body font-bold text-gold uppercase tracking-widest">{betterRegime}</p>
+                        <p className="text-body font-bold text-teal uppercase tracking-widest">{betterRegime}</p>
                       </div>
                     </div>
                   </motion.div>
@@ -603,7 +611,7 @@ function RegimeGauge({ oldTax, newTax }: { oldTax: number, newTax: number }) {
         .attr("width", width)
         .attr("height", height)
         .attr("rx", radius)
-        .attr("fill", "#D4AF37")
+        .attr("fill", "#2DD4BF")
         .attr("clip-path", `url(#${clipId})`)
         .style("opacity", 0.8);
         
@@ -659,7 +667,7 @@ function SlabVisualizer({ slabs, taxableIncome }: { slabs: any[], taxableIncome:
 
       const colors = d3.scaleLinear<string>()
         .domain([0, 0.05, 0.1, 0.15, 0.2, 0.3])
-        .range(["#D4AF3710", "#D4AF3720", "#D4AF3740", "#D4AF3760", "#D4AF3780", "#D4AF37"]);
+        .range(["#2DD4BF10", "#2DD4BF20", "#2DD4BF40", "#2DD4BF60", "#2DD4BF80", "#2DD4BF"]);
 
       let currentX = 0;
       
@@ -679,7 +687,7 @@ function SlabVisualizer({ slabs, taxableIncome }: { slabs: any[], taxableIncome:
 
         // Hover Effect
         rect.on("mouseenter", function() {
-          d3.select(this).attr("stroke", "#D4AF37").attr("stroke-width", 2);
+          d3.select(this).attr("stroke", "#2DD4BF").attr("stroke-width", 2);
         }).on("mouseleave", function() {
           d3.select(this).attr("stroke", "rgba(255,255,255,0.05)").attr("stroke-width", 1);
         });
@@ -758,12 +766,12 @@ function SimulatorField({
           "text-[10px] font-bold uppercase tracking-[0.2em]",
           error ? "text-apple-error" : "text-apple-text-tertiary"
         )}>{label}</label>
-        {max && <span className="text-[10px] font-mono text-gold/60">Limit: ₹{max.toLocaleString('en-IN')}</span>}
+        {max && <span className="text-[10px] font-mono text-teal/60">Limit: ₹{max.toLocaleString('en-IN')}</span>}
       </div>
       <div className="relative group">
         <div className={cn(
           "absolute left-6 top-1/2 -translate-y-1/2 font-medium transition-colors",
-          error ? "text-apple-error" : "text-apple-text-tertiary group-focus-within:text-gold"
+          error ? "text-apple-error" : "text-apple-text-tertiary group-focus-within:text-teal"
         )}>₹</div>
         <input 
           type="number" 
@@ -775,10 +783,10 @@ function SimulatorField({
             else onChange(val);
           }}
           className={cn(
-            "w-full bg-apple-elevated border h-16 rounded-[20px] pl-12 pr-6 outline-none text-body font-bold transition-all",
+            "w-full bg-apple-elevated border h-14 rounded-2xl pl-12 pr-6 outline-none text-body font-bold transition-all placeholder:text-apple-text-tertiary/20",
             error 
               ? "border-apple-error text-apple-error" 
-              : "border-white/5 focus:border-gold/30 hover:border-white/10 text-white"
+              : "border-white/5 focus:border-teal/30 hover:border-white/10 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.02)]"
           )}
           placeholder={placeholder}
         />
@@ -793,7 +801,7 @@ function SimulatorField({
             </motion.p>
           )}
         </AnimatePresence>
-        {!error && description && <p className="mt-2 text-[10px] text-apple-text-tertiary/60 italic">{description}</p>}
+        {!error && description && <p className="mt-2 text-[10px] text-apple-text-tertiary/60 italic leading-relaxed">{description}</p>}
       </div>
     </div>
   );
@@ -813,7 +821,7 @@ function ConditionalToggle({
   return (
     <div className="flex items-start justify-between gap-6 group">
       <div className="space-y-1">
-        <label className="text-body font-bold text-white group-hover:text-gold transition-colors">{label}</label>
+        <label className="text-body font-bold text-white group-hover:text-teal transition-colors">{label}</label>
         <p className="text-caption text-apple-text-tertiary font-medium">{description}</p>
       </div>
       <div className="flex bg-apple-card p-1 rounded-xl border border-white/5">
@@ -847,17 +855,17 @@ function SimResultCard({ title, data, highlight }: { title: string, data: any, h
       animate={{ opacity: 1, scale: 1 }}
       className={cn(
         "apple-card flex flex-col h-full border-2",
-        highlight ? "border-gold/30 bg-gold/[0.02]" : "border-white/5"
+        highlight ? "border-teal/30 bg-teal/[0.02]" : "border-white/5"
       )}
     >
       <div className="p-8 border-b border-white/5 flex justify-between items-center">
         <h4 className="text-headline font-bold">{title}</h4>
-        {highlight && <span className="text-[10px] font-bold px-3 py-1 bg-gold text-black rounded-full uppercase tracking-widest">Optimized</span>}
+        {highlight && <span className="text-[10px] font-bold px-3 py-1 bg-teal text-black rounded-full uppercase tracking-widest">Optimized</span>}
       </div>
       <div className="p-8 flex-1 space-y-8">
         <div className="space-y-2">
           <p className="text-caption font-bold text-apple-text-tertiary uppercase tracking-widest">Total Liability</p>
-          <p className={cn("text-title font-bold", highlight ? "text-gold" : "text-white")}>₹{Math.round(data.totalTax).toLocaleString('en-IN')}</p>
+          <p className={cn("text-title font-bold", highlight ? "text-teal" : "text-white")}>₹{Math.round(data.totalTax).toLocaleString('en-IN')}</p>
         </div>
         <div className="space-y-4">
           <p className="text-caption font-bold text-apple-text-tertiary uppercase tracking-widest">Slab Breakdown</p>

@@ -28,6 +28,7 @@ import {
   LogOut,
   TrendingUp,
   AlertCircle,
+  Activity,
   CheckCircle2,
   Lock,
   Menu,
@@ -47,6 +48,7 @@ import { UserProfile, TaxDocument, OptimizationStep, TaxDeductions, TaxCalculati
 import { analyzeTaxDocuments } from './lib/gemini';
 import Assistant from './components/Assistant';
 import { calculateTax } from './lib/taxCalculations';
+import { generateTaxStrategy } from './lib/strategyEngine';
 import { TAX_RULES, updateTaxRules } from './config/taxRules';
 import { PrivacyPolicyScreen, TermsScreen } from './components/LegalScreens';
 import WealthTips from './components/WealthTips';
@@ -57,24 +59,26 @@ import ReadinessScore from './components/ReadinessScore';
 import TaxCalculator from './components/TaxCalculator';
 import { NavLink, SectionHeader } from './components/Common';
 
+import { useStore } from './store/useStore';
+
 export default function App() {
-  const [user, setUser] = React.useState<User | null>(null);
-  const [profile, setProfile] = React.useState<UserProfile | null>(null);
-  const [loading, setLoading] = React.useState(true);
-  const [appError, setAppError] = React.useState<string | null>(null);
-  const [isOnline, setIsOnline] = React.useState(navigator.onLine);
-  const [currentView, setCurrentView] = React.useState<'landing' | 'onboarding' | 'dashboard' | 'vault' | 'simulator' | 'profile' | 'privacy' | 'terms' | 'guide' | 'summary'>('landing');
-  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
-  const [isAssistantOpen, setIsAssistantOpen] = React.useState(false);
-  const [discovery, setDiscovery] = React.useState<TaxAnalysisResult | null>(null);
-  const [activeDocumentId, setActiveDocumentId] = React.useState<string | null>(null);
-  const [documents, setDocuments] = React.useState<TaxDocument[]>([]);
+  const { 
+    user, setUser, 
+    profile, setProfile, 
+    loading, setLoading,
+    appError, setAppError,
+    isOnline, setIsOnline,
+    currentView, setCurrentView,
+    mobileMenuOpen, setMobileMenuOpen,
+    isAssistantOpen, setIsAssistantOpen,
+    discovery, setDiscovery,
+    activeDocumentId, setActiveDocumentId,
+    documents, setDocuments,
+    hasConsented, setHasConsented
+  } = useStore();
+
   const docsUnsubscribeRef = React.useRef<(() => void) | null>(null);
   
-  const [hasConsented, setHasConsented] = React.useState(() => {
-    return localStorage.getItem('taxbreaker_consent') === 'true';
-  });
-
   React.useEffect(() => {
     let timeoutId: any;
     let isMounted = true;
@@ -82,8 +86,8 @@ export default function App() {
     const initializeProtocol = async () => {
       // 1. Fetch Strategic Configuration
       try {
-        const res = await fetch('/api/config');
-        if (res.ok && isMounted) {
+        const res = await fetch('/api/config').catch(() => null);
+        if (res && res.ok && isMounted) {
           const data = await res.json();
           updateTaxRules(data);
           console.log("Strategic config synchronized:", data.lastUpdated);
@@ -98,38 +102,31 @@ export default function App() {
         try {
           setUser(u);
           if (u) {
-            const userDoc = await getDoc(doc(db, 'users', u.uid));
+            const userDocRef = doc(db, 'users', u.uid);
+            const userDoc = await getDoc(userDocRef);
             if (userDoc.exists()) {
               const data = userDoc.data() as UserProfile;
               setProfile(data);
-              if (data.lastAnalysis) {
-                setDiscovery(data.lastAnalysis);
-              }
-              if (data.onboardingComplete) {
-                setCurrentView('dashboard');
-              } else {
-                setCurrentView('onboarding');
-              }
+              if (data.lastAnalysis) setDiscovery(data.lastAnalysis);
+              setCurrentView(data.onboardingComplete ? 'dashboard' : 'onboarding');
             } else {
               // Initialize empty profile
               const newProfile: UserProfile = {
                 uid: u.uid,
                 email: u.email || '',
-                displayName: u.displayName || '',
+                displayName: u.displayName || u.email?.split('@')[0] || 'Tax Optimizer',
                 onboardingComplete: false,
                 goals: [],
                 taxScore: 0,
                 completedStepIds: []
               };
-              await setDoc(doc(db, 'users', u.uid), newProfile);
+              await setDoc(userDocRef, newProfile);
               setProfile(newProfile);
               setCurrentView('onboarding');
             }
 
             // Listen to documents
-            if (docsUnsubscribeRef.current) {
-              docsUnsubscribeRef.current();
-            }
+            if (docsUnsubscribeRef.current) docsUnsubscribeRef.current();
 
             const docsQuery = query(
               collection(db, 'users', u.uid, 'documents'),
@@ -141,7 +138,12 @@ export default function App() {
                 setDocuments(docs);
               }
             }, (err) => {
-              console.error("Documents sync error:", err);
+              if (err.message.includes('permission-denied')) {
+                console.warn('[VAULT_SECURITY]: Login required or access denied.');
+                setAppError("Login required or access denied");
+              } else {
+                console.error("Documents sync error:", err);
+              }
             });
           } else {
             setProfile(null);
@@ -153,7 +155,7 @@ export default function App() {
           }
         } catch (err) {
           console.error("Auth initialization error:", err);
-          setAppError("System initialization failed. Our security protocols may be blocked or the network is unstable.");
+          setAppError("System initialization failed. Our security protocols or network connection might be unstable.");
         } finally {
           if (isMounted) {
             setLoading(false);
@@ -204,27 +206,51 @@ export default function App() {
 
   const handleConsent = (consented: boolean) => {
     setHasConsented(consented);
-    localStorage.setItem('taxbreaker_consent', String(consented));
   };
 
   const handleToggleFilingStep = async (stepId: string) => {
-    if (!profile || !user) return;
+    const u = auth.currentUser;
+    if (!u || !profile) {
+       setAppError("Login required or access denied");
+       return;
+    }
+
     const currentSteps = profile.completedFilingStepIds || [];
-    const updated = currentSteps.includes(stepId)
+    const isDone = currentSteps.includes(stepId);
+    const updated = isDone 
       ? currentSteps.filter(id => id !== stepId)
       : [...currentSteps, stepId];
     
     setProfile({ ...profile, completedFilingStepIds: updated });
-    await updateDoc(doc(db, 'users', user.uid), {
-      completedFilingStepIds: updated
-    });
+    try {
+      await updateDoc(doc(db, 'users', u.uid), {
+        completedFilingStepIds: updated
+      });
+    } catch (err: any) {
+      if (err.message?.includes('permission-denied')) {
+        setAppError("Login required or access denied");
+      }
+    }
   };
 
   const handleUpdateProfile = async (updates: Partial<UserProfile>) => {
-    if (!profile || !user) return;
-    const updated = { ...profile, ...updates };
-    setProfile(updated);
-    await updateDoc(doc(db, 'users', user.uid), updates as any);
+    const u = auth.currentUser;
+    if (!u || !profile) {
+      console.error("[SECURITY]: Profile update attempt without verified auth.");
+      setAppError("Login required or access denied");
+      return;
+    }
+    
+    try {
+      const updated = { ...profile, ...updates };
+      setProfile(updated);
+      await updateDoc(doc(db, 'users', u.uid), updates as any);
+    } catch (err: any) {
+      if (err.message?.includes('permission-denied')) {
+        setAppError("Login required or access denied");
+      }
+      throw err;
+    }
   };
 
   const handleDiscovery = async (result: TaxAnalysisResult) => {
@@ -244,11 +270,23 @@ export default function App() {
   };
 
   const handleUpdateAnalysis = async (updatedAnalysis: TaxAnalysisResult) => {
+    const u = auth.currentUser;
+    if (!u) {
+      setAppError("Login required or access denied");
+      return;
+    }
+
     setDiscovery(updatedAnalysis);
-    if (activeDocumentId && user) {
-      await updateDoc(doc(db, 'users', user.uid, 'documents', activeDocumentId), {
-        analysis: updatedAnalysis
-      });
+    if (activeDocumentId) {
+      try {
+        await updateDoc(doc(db, 'users', u.uid, 'documents', activeDocumentId), {
+          analysis: updatedAnalysis
+        });
+      } catch (err: any) {
+        if (err.message?.includes('permission-denied')) {
+          setAppError("Login required or access denied");
+        }
+      }
     }
     // Also update profile for consistency
     if (profile) {
@@ -258,39 +296,60 @@ export default function App() {
 
   const handleLogout = () => {
     signOut(auth);
-    setMobileMenuOpen(false);
   };
 
   const handleDeleteAllData = async () => {
-    if (!user || !profile) return;
+    const u = auth.currentUser;
+    if (!u || !profile) return;
     try {
-      // 1. Delete Firestore document
-      await deleteDoc(doc(db, 'users', user.uid));
-      // 2. Clear local storage
-      localStorage.removeItem('taxbreaker_consent');
-      // 3. Reset states
+      await deleteDoc(doc(db, 'users', u.uid));
+      setHasConsented(false);
       setProfile(null);
       setDiscovery(null);
-      // 4. Sign out
       await signOut(auth);
       setCurrentView('landing');
-      setMobileMenuOpen(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Data deletion failed:", error);
+      if (error.message?.includes('permission-denied')) {
+        setAppError("Login required or access denied");
+      }
     }
   };
 
   if (loading) {
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center bg-apple-black">
+      <div className="h-screen w-screen flex flex-col items-center justify-center bg-apple-black overflow-hidden relative">
+        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
+          <div className="absolute top-1/4 -left-32 w-96 h-96 bg-teal/5 blur-[150px] rounded-full animate-pulse" />
+          <div className="absolute bottom-1/4 -right-32 w-96 h-96 bg-teal/5 blur-[150px] rounded-full animate-pulse [animation-delay:1s]" />
+        </div>
+
         <motion.div 
-          animate={{ scale: [1, 1.1, 1], rotate: [0, 180, 360] }}
-          transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-          className="w-16 h-16 border-2 border-gold rounded-2xl mb-8 relative"
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="relative z-10 flex flex-col items-center"
         >
-          <div className="absolute inset-0 bg-gold/5 blur-xl animate-pulse" />
+          <div className="relative mb-12">
+            <div className="w-20 h-20 bg-teal/10 rounded-3xl flex items-center justify-center text-teal shadow-[0_0_40px_rgba(45,212,191,0.2)] border border-teal/20 relative z-10">
+              <Activity className="w-10 h-10 animate-pulse" />
+            </div>
+            <div className="absolute -inset-4 border-2 border-teal/5 rounded-[40px] animate-spin [animation-duration:10s]" />
+          </div>
+          <h2 className="text-white text-xl font-bold tracking-tight mb-3">TaxBreaker</h2>
+          <div className="flex items-center gap-3">
+             <div className="flex gap-1">
+                {[0, 1, 2].map((i) => (
+                  <motion.div 
+                    key={i}
+                    animate={{ opacity: [0.2, 1, 0.2] }}
+                    transition={{ repeat: Infinity, duration: 1.5, delay: i * 0.2 }}
+                    className="w-1 h-1 bg-teal rounded-full"
+                  />
+                ))}
+             </div>
+             <p className="text-apple-text-tertiary text-[10px] uppercase tracking-[0.3em] font-bold">Synchronizing Protocols</p>
+          </div>
         </motion.div>
-        <p className="text-subtext font-mono text-gold/60 uppercase tracking-[0.3em] animate-pulse">Initializing Strategic Protocols</p>
       </div>
     );
   }
@@ -299,7 +358,7 @@ export default function App() {
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-apple-black p-8 text-center">
         <div className="w-20 h-20 bg-apple-error/10 rounded-full flex items-center justify-center mb-10 border border-apple-error/20">
-          <AlertCircle className="w-10 h-10 text-apple-error" />
+          <Activity className="w-10 h-10 text-apple-error" />
         </div>
         <h1 className="text-title font-bold text-white mb-4">System Disruption</h1>
         <p className="text-body text-apple-text-tertiary max-w-sm mb-12">
@@ -316,230 +375,244 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-apple-black text-white font-sans overflow-x-hidden">
-      {/* Navigation */}
-      <nav className="fixed top-0 w-full z-50 border-b border-white/5 bg-apple-black/80 backdrop-blur-2xl">
-        <div className="max-w-7xl mx-auto px-8 h-24 flex items-center justify-between">
-          <div 
-            className="flex items-center gap-4 cursor-pointer group"
-            onClick={() => setCurrentView(user ? 'dashboard' : 'landing')}
-          >
-            <div className="w-6 h-6 border border-gold/40 flex items-center justify-center rotate-45 group-hover:rotate-90 transition-transform duration-700">
-              <Shield className="w-3 h-3 text-gold -rotate-45 group-hover:-rotate-90 transition-transform duration-700" strokeWidth={1.5} />
-            </div>
-            <div className="flex flex-col">
-              <span className="text-caption font-bold uppercase tracking-[0.4em]">TaxBreaker</span>
-              {!isOnline && (
-                <span className="text-[8px] font-bold text-apple-warning uppercase tracking-widest mt-0.5">Offline</span>
-              )}
-            </div>
-          </div>
-
-          <div className="hidden md:flex items-center gap-12">
-            {user && profile?.onboardingComplete && (
-              <>
-                <NavLink active={currentView === 'dashboard'} onClick={() => setCurrentView('dashboard')}>Concierge</NavLink>
-                <NavLink active={currentView === 'vault'} onClick={() => setCurrentView('vault')}>Vault</NavLink>
-                <NavLink active={currentView === 'simulator'} onClick={() => setCurrentView('simulator')}>Simulator</NavLink>
-                <NavLink active={currentView === 'guide'} onClick={() => setCurrentView('guide')}>Guide</NavLink>
-                <NavLink active={currentView === 'profile'} onClick={() => setCurrentView('profile')}>Profile</NavLink>
-              </>
-            )}
-          </div>
-
-          <div className="flex items-center gap-8">
-            {user ? (
-              <div className="flex items-center gap-6">
-                <button 
-                  onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                  className="md:hidden p-2 text-apple-text-tertiary"
-                >
-                  {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
-                </button>
-                <div className="hidden md:flex items-center gap-6">
-                  <div className="text-right">
-                    <p className="small-caps mb-1">{profile?.displayName}</p>
-                    <button onClick={handleLogout} className="text-caption text-apple-text-tertiary hover:text-apple-error transition-colors uppercase tracking-widest">Sign Out</button>
-                  </div>
-                  <div className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center text-gold/40 bg-apple-card">
-                    <UserIcon size={18} strokeWidth={1} />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <button onClick={handleLogin} className="small-caps border border-white/10 px-8 py-2.5 rounded-full hover:border-gold/40 transition-colors">
-                Sign In
-              </button>
-            )}
-          </div>
-        </div>
-      </nav>
-
-      {/* Mobile Menu */}
-      <AnimatePresence>
-        {mobileMenuOpen && (
-          <motion.div 
-            initial={{ opacity: 0, y: -20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            className="fixed inset-0 z-40 bg-black pt-24 px-6 md:hidden"
-          >
-            <div className="flex flex-col gap-6">
-               <NavLink active={currentView === 'dashboard'} onClick={() => { setCurrentView('dashboard'); setMobileMenuOpen(false); }}>Dashboard</NavLink>
-               <NavLink active={currentView === 'vault'} onClick={() => { setCurrentView('vault'); setMobileMenuOpen(false); }}>Vault</NavLink>
-               <NavLink active={currentView === 'simulator'} onClick={() => { setCurrentView('simulator'); setMobileMenuOpen(false); }}>Simulator</NavLink>
-               <NavLink active={currentView === 'guide'} onClick={() => { setCurrentView('guide'); setMobileMenuOpen(false); }}>Guide</NavLink>
-               <NavLink active={currentView === 'profile'} onClick={() => { setCurrentView('profile'); setMobileMenuOpen(false); }}>Profile</NavLink>
-               <button onClick={handleLogout} className="flex items-center gap-2 text-apple-error mt-4 font-bold uppercase tracking-widest text-caption">
-                 <LogOut className="w-5 h-5" /> Logout
-               </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Online Status Banner */}
-      <AnimatePresence>
-        {!isOnline && (
-          <motion.div 
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1, marginTop: '6rem' }}
-            exit={{ height: 0, opacity: 0, marginTop: 0 }}
-            className="bg-apple-warning/10 border-b border-apple-warning/20 overflow-hidden relative z-[45]"
-          >
-            <div className="max-w-7xl mx-auto px-8 py-3 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <WifiOff className="w-3.5 h-3.5 text-apple-warning" />
-                <span className="text-[10px] font-bold text-apple-warning uppercase tracking-[0.2em]">
-                  Local Strategic Mode • No Network Detected
-                </span>
-              </div>
-              <p className="text-[10px] text-apple-text-tertiary font-medium">
-                Simulation active. Intelligence synchronization suspended.
-              </p>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Main Content */}
-      <main className={cn("pb-32", isOnline ? "pt-24" : "pt-8")}>
-        <AnimatePresence mode="wait">
-          {currentView === 'landing' && (
-            <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <LandingView 
-                onStart={handleLogin} 
-                hasConsented={hasConsented} 
-                onConsent={handleConsent}
-                onOpenTerms={() => setCurrentView('terms')}
-                onOpenPrivacy={() => setCurrentView('privacy')}
-              />
-            </motion.div>
-          )}
-          {currentView === 'privacy' && (
-            <motion.div key="privacy" initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }}>
-              <PrivacyPolicyScreen onBack={() => setCurrentView(user ? 'profile' : 'landing')} />
-            </motion.div>
-          )}
-          {currentView === 'terms' && (
-            <motion.div key="terms" initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }}>
-              <TermsScreen onBack={() => setCurrentView(user ? 'profile' : 'landing')} />
-            </motion.div>
-          )}
-          {currentView === 'onboarding' && profile && (
-            <motion.div key="onboarding" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <OnboardingView 
-                profile={profile} 
-                onComplete={(updated) => {
-                  setProfile(updated);
-                  setCurrentView('dashboard');
-                }} 
-              />
-            </motion.div>
-          )}
-          {currentView === 'dashboard' && profile && (
-            <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <DashboardView 
-                profile={profile} 
-                discovery={discovery} 
-                isOnline={isOnline} 
-                onOpenSummary={() => setCurrentView('summary')}
-                onOpenGuide={() => setCurrentView('guide')}
-                onUpdateProfile={handleUpdateProfile}
-              />
-            </motion.div>
-          )}
-          {currentView === 'vault' && profile && (
-            <motion.div key="vault" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <VaultView 
-                userId={profile.uid} 
-                documents={documents}
-                onDiscover={handleDiscovery} 
-                onSelect={handleDocumentSelect}
-                isOnline={isOnline} 
-              />
-            </motion.div>
-          )}
-          {currentView === 'simulator' && profile && (
-            <motion.div key="simulator" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <TaxCalculator profile={profile} discovery={discovery?.extractedValues || null} />
-            </motion.div>
-          )}
-          {currentView === 'guide' && profile && (
-            <motion.div key="guide" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <FilingGuide 
-                completedIds={profile.completedFilingStepIds || []} 
-                onToggle={handleToggleFilingStep} 
-              />
-            </motion.div>
-          )}
-          {currentView === 'profile' && profile && (
-            <motion.div key="profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <ProfileView 
-                profile={profile} 
-                onLogout={handleLogout} 
-                onDeleteData={handleDeleteAllData}
-                onOpenPrivacy={() => setCurrentView('privacy')}
-                onOpenTerms={() => setCurrentView('terms')}
-              />
-            </motion.div>
-          )}
-          {currentView === 'summary' && profile && (
-            <motion.div key="summary" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <SummaryView 
-                profile={profile} 
-                analysis={discovery} 
-                onBack={() => setCurrentView('dashboard')} 
-                onUpdateAnalysis={handleUpdateAnalysis}
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </main>
-
-      {/* Assistant Overlay Toggle */}
+    <div className="min-h-screen bg-apple-black text-white font-sans overflow-x-hidden flex flex-col md:flex-row">
+      {/* Desktop Sidebar */}
       {user && profile?.onboardingComplete && (
-        <>
-          <AnimatePresence>
-            {isAssistantOpen && profile && (
-              <Assistant profile={profile} discovery={discovery} onClose={() => setIsAssistantOpen(false)} isOnline={isOnline} />
+        <aside className="hidden md:flex w-80 h-screen sticky top-0 flex-col bg-apple-secondary border-r border-white/5 z-50">
+          <div className="p-10">
+            <div 
+              className="flex items-center gap-4 cursor-pointer group"
+              onClick={() => setCurrentView('dashboard')}
+            >
+              <div className="w-8 h-8 border border-teal/40 flex items-center justify-center rotate-45 group-hover:rotate-90 transition-transform duration-700">
+                <Shield className="w-4 h-4 text-teal -rotate-45 group-hover:-rotate-90 transition-transform duration-700" strokeWidth={1.5} />
+              </div>
+              <span className="text-caption font-bold uppercase tracking-[0.4em]">TaxBreaker</span>
+            </div>
+          </div>
+
+          <nav className="flex-1 px-6 space-y-2 mt-8">
+            <SidebarLink icon={<LayoutDashboard size={20} />} active={currentView === 'dashboard'} onClick={() => setCurrentView('dashboard')}>Concierge</SidebarLink>
+            <SidebarLink icon={<FileText size={20} />} active={currentView === 'vault'} onClick={() => setCurrentView('vault')}>Vault</SidebarLink>
+            <SidebarLink icon={<Calculator size={20} />} active={currentView === 'simulator'} onClick={() => setCurrentView('simulator')}>Simulator</SidebarLink>
+            <SidebarLink icon={<ClipboardList size={20} />} active={currentView === 'guide'} onClick={() => setCurrentView('guide')}>Guide</SidebarLink>
+            <SidebarLink icon={<UserIcon size={20} />} active={currentView === 'profile'} onClick={() => setCurrentView('profile')}>Profile</SidebarLink>
+          </nav>
+
+          <div className="p-8 border-t border-white/5">
+            <div className="flex items-center gap-4 mb-8">
+              <div className="w-12 h-12 rounded-2xl bg-apple-card border border-white/5 flex items-center justify-center text-teal/40">
+                <UserIcon size={22} strokeWidth={1.5} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-caption font-bold uppercase tracking-widest truncate max-w-[140px] text-white">
+                  {profile?.displayName?.split(' ')[0] || 'User'}
+                </span>
+                <span className="text-[10px] text-apple-text-tertiary uppercase font-bold tracking-widest mt-0.5">Premium Strategist</span>
+              </div>
+            </div>
+            <button 
+              onClick={handleLogout}
+              className="w-full h-12 rounded-xl border border-white/5 text-apple-text-tertiary text-caption font-bold uppercase tracking-widest hover:text-apple-error hover:border-apple-error/20 transition-all flex items-center justify-center gap-2"
+            >
+              <LogOut size={16} /> Sign Out
+            </button>
+          </div>
+        </aside>
+      )}
+
+      {/* Mobile Header */}
+      {user && profile?.onboardingComplete && (
+        <header className="md:hidden fixed top-0 w-full h-20 bg-apple-black/80 backdrop-blur-2xl border-b border-white/5 z-50 flex items-center justify-between px-6">
+          <div className="flex items-center gap-3">
+            <Shield className="w-5 h-5 text-teal" />
+            <span className="text-[11px] font-bold uppercase tracking-[0.3em]">TaxBreaker</span>
+          </div>
+          <button onClick={() => setCurrentView('profile')} className="w-10 h-10 rounded-full bg-apple-card border border-white/5 flex items-center justify-center">
+            <UserIcon size={18} className="text-teal/40" />
+          </button>
+        </header>
+      )}
+
+      {/* Main Content Area */}
+      <div className="flex-1 flex flex-col min-h-screen">
+        <main className={cn(
+          "flex-1 md:pb-12",
+          user && profile?.onboardingComplete ? "pt-20 md:pt-0" : "pt-0",
+          user && profile?.onboardingComplete && "pb-24 md:pb-12"
+        )}>
+          <AnimatePresence mode="wait">
+            {currentView === 'landing' && (
+              <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <LandingView 
+                  onStart={handleLogin} 
+                  hasConsented={hasConsented} 
+                  onConsent={handleConsent}
+                  onOpenTerms={() => setCurrentView('terms')}
+                  onOpenPrivacy={() => setCurrentView('privacy')}
+                />
+              </motion.div>
+            )}
+            {currentView === 'privacy' && (
+              <motion.div key="privacy" initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }}>
+                <PrivacyPolicyScreen onBack={() => setCurrentView(user ? 'profile' : 'landing')} />
+              </motion.div>
+            )}
+            {currentView === 'terms' && (
+              <motion.div key="terms" initial={{ opacity: 0, x: 50 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -50 }}>
+                <TermsScreen onBack={() => setCurrentView(user ? 'profile' : 'landing')} />
+              </motion.div>
+            )}
+            {currentView === 'onboarding' && profile && (
+              <motion.div key="onboarding" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <OnboardingView 
+                  profile={profile} 
+                  onComplete={(updated) => {
+                    setProfile(updated);
+                    setCurrentView('dashboard');
+                  }} 
+                />
+              </motion.div>
+            )}
+            {currentView === 'dashboard' && profile && (
+              <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <DashboardView 
+                  profile={profile} 
+                  discovery={discovery} 
+                  isOnline={isOnline} 
+                  onOpenSummary={() => setCurrentView('summary')}
+                  onOpenGuide={() => setCurrentView('guide')}
+                  onUpdateProfile={handleUpdateProfile}
+                />
+              </motion.div>
+            )}
+            {currentView === 'vault' && profile && (
+              <motion.div key="vault" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <VaultView 
+                  userId={profile.uid} 
+                  documents={documents}
+                  onDiscover={handleDiscovery} 
+                  onSelect={handleDocumentSelect}
+                  isOnline={isOnline} 
+                />
+              </motion.div>
+            )}
+            {currentView === 'simulator' && profile && (
+              <motion.div key="simulator" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <TaxCalculator profile={profile} discovery={discovery?.extractedValues || null} />
+              </motion.div>
+            )}
+            {currentView === 'guide' && profile && (
+              <motion.div key="guide" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <FilingGuide 
+                  completedIds={profile.completedFilingStepIds || []} 
+                  onToggle={handleToggleFilingStep} 
+                />
+              </motion.div>
+            )}
+            {currentView === 'profile' && profile && (
+              <motion.div key="profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <ProfileView 
+                  profile={profile} 
+                  onLogout={handleLogout} 
+                  onDeleteData={handleDeleteAllData}
+                  onOpenPrivacy={() => setCurrentView('privacy')}
+                  onOpenTerms={() => setCurrentView('terms')}
+                />
+              </motion.div>
+            )}
+            {currentView === 'summary' && profile && (
+              <motion.div key="summary" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <SummaryView 
+                  profile={profile} 
+                  analysis={discovery} 
+                  onBack={() => setCurrentView('dashboard')} 
+                  onUpdateAnalysis={handleUpdateAnalysis}
+                />
+              </motion.div>
             )}
           </AnimatePresence>
-          <motion.button
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            onClick={() => setIsAssistantOpen(!isAssistantOpen)}
-            className="fixed bottom-8 right-8 w-14 h-14 gold-gradient rounded-full shadow-2xl flex items-center justify-center text-black z-50 cursor-pointer"
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-          >
-            {isAssistantOpen ? <X strokeWidth={2.5} /> : <MessageSquare strokeWidth={2.5} />}
-          </motion.button>
-        </>
+        </main>
+      </div>
+
+      {/* Mobile Bottom Nav */}
+      {user && profile?.onboardingComplete && (
+        <nav className="md:hidden fixed bottom-10 left-6 right-6 h-18 bg-apple-card/90 backdrop-blur-3xl border border-white/5 rounded-3xl z-50 flex items-center justify-around px-2 shadow-2xl">
+          <MobileNavLink icon={<LayoutDashboard size={20} />} active={currentView === 'dashboard'} onClick={() => setCurrentView('dashboard')} />
+          <MobileNavLink icon={<FileText size={20} />} active={currentView === 'vault'} onClick={() => setCurrentView('vault')} />
+          <div className="relative -top-4">
+             <button 
+               onClick={() => setIsAssistantOpen(true)}
+               className="w-16 h-16 rounded-full bg-teal shadow-2xl shadow-teal/20 flex items-center justify-center text-black"
+             >
+               <MessageSquare size={24} />
+             </button>
+          </div>
+          <MobileNavLink icon={<Calculator size={20} />} active={currentView === 'simulator'} onClick={() => setCurrentView('simulator')} />
+          <MobileNavLink icon={<ClipboardList size={20} />} active={currentView === 'guide'} onClick={() => setCurrentView('guide')} />
+        </nav>
+      )}
+
+      {/* Assistant Overlay Portal */}
+      {user && profile?.onboardingComplete && (
+        <AnimatePresence>
+          {isAssistantOpen && profile && (
+            <Assistant 
+              profile={profile} 
+              discovery={discovery} 
+              onClose={() => setIsAssistantOpen(false)} 
+              isOnline={isOnline} 
+            />
+          )}
+        </AnimatePresence>
+      )}
+
+      {/* Desktop Assistant Trigger */}
+      {user && profile?.onboardingComplete && !isAssistantOpen && (
+        <motion.button
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          onClick={() => setIsAssistantOpen(true)}
+          className="hidden md:flex fixed bottom-12 right-12 w-16 h-16 bg-teal rounded-3xl shadow-2xl shadow-teal/20 items-center justify-center text-black z-40 cursor-pointer"
+          whileHover={{ scale: 1.1, borderRadius: "20px" }}
+          whileTap={{ scale: 0.9 }}
+        >
+          <MessageSquare strokeWidth={2.5} size={24} />
+        </motion.button>
       )}
     </div>
   );
 }
+
+function SidebarLink({ children, icon, active, onClick }: { children: React.ReactNode, icon: React.ReactNode, active: boolean, onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-full h-14 flex items-center gap-4 px-4 rounded-xl transition-all duration-300",
+        active ? "bg-teal/10 text-teal border-l-4 border-teal" : "text-apple-text-tertiary hover:bg-white/5 hover:text-white"
+      )}
+    >
+      {icon}
+      <span className="text-subtext font-bold uppercase tracking-widest">{children}</span>
+    </button>
+  );
+}
+
+function MobileNavLink({ icon, active, onClick }: { icon: React.ReactNode, active: boolean, onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        "w-12 h-12 flex items-center justify-center rounded-2xl transition-all duration-300",
+        active ? "text-teal" : "text-apple-text-tertiary"
+      )}
+    >
+      {icon}
+    </button>
+  );
+}
+
 
 function LandingView({ 
   onStart, 
@@ -562,7 +635,7 @@ function LandingView({
         transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }}
         className="text-caption font-bold uppercase tracking-widest border border-white/10 px-6 py-2 rounded-full mb-8 text-apple-text-secondary"
       >
-        <span className="text-gold mr-2">✦</span>
+        <span className="text-teal mr-2">✦</span>
         Establish your digital tax vault
       </motion.div>
 
@@ -608,17 +681,17 @@ function LandingView({
               id="consent" 
               checked={hasConsented}
               onChange={(e) => onConsent(e.target.checked)}
-              className="w-5 h-5 accent-gold cursor-pointer"
+              className="w-5 h-5 accent-teal cursor-pointer"
             />
             <label htmlFor="consent" className="text-caption text-apple-text-tertiary font-medium cursor-pointer">
               I agree to the 
-              <button onClick={onOpenTerms} className="text-gold hover:underline mx-1">Terms of Use</button> 
+              <button onClick={onOpenTerms} className="text-teal hover:underline mx-1">Terms of Use</button> 
               & 
-              <button onClick={onOpenPrivacy} className="text-gold hover:underline ml-1">Privacy Policy</button>
+              <button onClick={onOpenPrivacy} className="text-teal hover:underline ml-1">Privacy Policy</button>
             </label>
           </div>
           <p className="text-[10px] text-apple-text-tertiary uppercase tracking-widest font-bold mt-4">
-            <Shield className="w-3 h-3 inline-block mr-2 text-gold align-middle" /> 
+            <Shield className="w-3 h-3 inline-block mr-2 text-teal align-middle" /> 
             Zero-Data Architecture: Your financials remain in your control. Never shared.
           </p>
         </div>
@@ -646,13 +719,14 @@ function StatCard({ label, value, sub }: { label: string, value: string, sub: st
   return (
     <div className="apple-card text-left group hover:bg-apple-elevated transition-colors duration-300">
       <p className="text-caption font-bold uppercase tracking-widest text-apple-text-tertiary mb-2">{label}</p>
-      <p className="text-title font-bold text-gold mb-1">{value}</p>
+      <p className="text-title font-bold text-teal mb-1">{value}</p>
       <p className="text-subtext text-apple-text-secondary">{sub}</p>
     </div>
   );
 }
 
 function OnboardingView({ profile, onComplete }: { profile: UserProfile, onComplete: (u: UserProfile) => void }) {
+  const { setProfile, setCurrentView } = useStore();
   const [step, setStep] = React.useState(1);
   const [formData, setFormData] = React.useState({
     country: 'India',
@@ -663,7 +737,7 @@ function OnboardingView({ profile, onComplete }: { profile: UserProfile, onCompl
     taxRegime: 'new' as 'old' | 'new'
   });
 
-  const countries = ['India', 'United States', 'United Kingdom', 'Canada', 'Australia', 'Germany'];
+  const countries = ['India', 'USA', 'UK', 'Canada', 'Australia'];
   const jobTypes = ['Salaried', 'Self-Employed', 'Business Owner', 'Professional'];
 
   const handleFinish = async () => {
@@ -673,6 +747,8 @@ function OnboardingView({ profile, onComplete }: { profile: UserProfile, onCompl
       onboardingComplete: true
     };
     await updateDoc(doc(db, 'users', profile.uid), updated as any);
+    setProfile(updated);
+    setCurrentView('dashboard');
     onComplete(updated);
   };
 
@@ -683,12 +759,12 @@ function OnboardingView({ profile, onComplete }: { profile: UserProfile, onCompl
             {[1, 2, 3].map(s => (
                <div key={s} className={cn(
                  "h-1.5 transition-all duration-700 rounded-full",
-                 step >= s ? "w-16 bg-gold" : "w-8 bg-white/5"
+                 step >= s ? "w-16 bg-teal" : "w-8 bg-white/5"
                )} />
             ))}
          </div>
-         <span className="small-caps mb-4 block">Initialization Sequence</span>
-         <h1 className="text-title md:text-large-title font-bold tracking-tight">Configure your intelligence profile.</h1>
+         <span className="small-caps mb-4 block text-teal/60">Initialization Sequence</span>
+         <h1 className="text-title md:text-large-title font-bold tracking-tight text-white leading-tight">Configure your <br/>intelligence profile.</h1>
       </div>
 
       <AnimatePresence mode="wait">
@@ -698,42 +774,26 @@ function OnboardingView({ profile, onComplete }: { profile: UserProfile, onCompl
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
-            className="space-y-16"
+            className="space-y-12"
           >
             <div className="space-y-6">
-              <label className="small-caps block">Jurisdiction</label>
-              <select 
-                value={formData.country} 
-                onChange={(e) => setFormData({...formData, country: e.target.value})}
-                className="w-full bg-apple-card border border-white/5 rounded-2xl h-14 px-6 outline-none focus:border-gold transition-all text-body font-medium appearance-none"
-              >
-                {countries.map(c => <option key={c} value={c} className="bg-apple-card text-white">{c}</option>)}
-              </select>
-            </div>
-            <div className="space-y-6">
-              <label className="small-caps block">Entity Structure</label>
+              <label className="text-caption font-bold uppercase tracking-widest text-apple-text-tertiary">Jurisdiction</label>
               <div className="grid grid-cols-2 gap-4">
-                {jobTypes.map(type => (
+                {countries.map(c => (
                   <button
-                    key={type}
-                    onClick={() => setFormData({...formData, employmentType: type})}
+                    key={c}
+                    onClick={() => setFormData({ ...formData, country: c })}
                     className={cn(
-                      "h-16 rounded-2xl border transition-all duration-300 font-semibold text-subtext",
-                      formData.employmentType === type ? "border-gold text-gold bg-gold/10" : "border-white/5 bg-apple-card text-apple-text-tertiary hover:border-white/20"
+                      "h-14 rounded-xl border transition-all text-caption font-bold uppercase tracking-widest",
+                      formData.country === c ? "border-teal bg-teal/10 text-teal" : "border-white/5 bg-apple-card text-apple-text-tertiary hover:border-white/20"
                     )}
                   >
-                    {type}
+                    {c}
                   </button>
                 ))}
               </div>
             </div>
-            <button 
-              disabled={!formData.employmentType}
-              onClick={() => setStep(2)} 
-              className="premium-btn-primary w-full"
-            >
-              Continue
-            </button>
+            <button onClick={() => setStep(2)} className="premium-btn-primary w-full shadow-2xl shadow-teal/20">Continue Process</button>
           </motion.div>
         )}
 
@@ -743,34 +803,40 @@ function OnboardingView({ profile, onComplete }: { profile: UserProfile, onCompl
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
-            className="space-y-16"
+            className="space-y-12"
           >
-            <div className="space-y-6">
-              <label className="small-caps block">Capital Position (Annual)</label>
-              <div className="relative bg-apple-card border border-white/5 rounded-2xl focus-within:border-gold transition-all px-6">
-                <span className="absolute left-6 top-1/2 -translate-y-1/2 text-gold font-bold text-headline">₹</span>
-                <input 
-                  type="number"
-                  value={formData.income || ''}
-                  onChange={(e) => setFormData({...formData, income: Number(e.target.value)})}
-                  className="w-full bg-transparent h-16 pl-8 pr-4 outline-none text-headline font-bold"
-                  placeholder="0.00"
-                />
+             <div className="space-y-6">
+              <label className="text-caption font-bold uppercase tracking-widest text-apple-text-tertiary">Engagement Model</label>
+              <div className="grid grid-cols-2 gap-4">
+                {jobTypes.map(t => (
+                  <button
+                    key={t}
+                    onClick={() => setFormData({ ...formData, employmentType: t })}
+                    className={cn(
+                      "h-14 rounded-xl border transition-all text-caption font-bold uppercase tracking-widest",
+                      formData.employmentType === t ? "border-teal bg-teal/10 text-teal" : "border-white/5 bg-apple-card text-apple-text-tertiary hover:border-white/20"
+                    )}
+                  >
+                    {t}
+                  </button>
+                ))}
               </div>
             </div>
             <div className="space-y-6">
-              <label className="small-caps block">Asset Portfolio</label>
-              <textarea 
-                value={formData.assets}
-                onChange={(e) => setFormData({...formData, assets: e.target.value})}
-                className="w-full bg-apple-card border border-white/5 rounded-2xl p-8 min-h-[180px] outline-none focus:border-gold transition-all text-body font-normal placeholder:text-apple-text-tertiary"
-                placeholder="List significant holdings (Real estate, Equities, Digital Assets)..."
-              />
+              <label className="text-caption font-bold uppercase tracking-widest text-apple-text-tertiary">Annual Yield (Gross)</label>
+              <div className="relative">
+                <span className="absolute left-6 top-1/2 -translate-y-1/2 text-teal font-bold text-headline">₹</span>
+                <input 
+                  type="number"
+                  value={formData.income || ''}
+                  onChange={(e) => setFormData({ ...formData, income: Number(e.target.value) })}
+                  placeholder="0.00"
+                  className="w-full h-16 bg-apple-card border border-white/5 rounded-xl px-6 pl-12 text-headline focus:border-teal outline-none transition-all placeholder:text-white/10 font-bold"
+                />
+              </div>
             </div>
-            <div className="flex gap-4">
-              <button onClick={() => setStep(1)} className="premium-btn-secondary flex-1">Back</button>
-              <button onClick={() => setStep(3)} className="premium-btn-primary flex-1">Continue</button>
-            </div>
+            <button onClick={() => setStep(3)} disabled={!formData.employmentType || !formData.income} className="premium-btn-primary w-full shadow-2xl shadow-teal/20">Finalize Parameters</button>
+            <button onClick={() => setStep(1)} className="w-full text-caption text-apple-text-tertiary font-bold uppercase tracking-widest hover:text-white transition-colors">Return to Step 1</button>
           </motion.div>
         )}
 
@@ -780,46 +846,18 @@ function OnboardingView({ profile, onComplete }: { profile: UserProfile, onCompl
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -20 }}
-            className="space-y-16"
+            className="space-y-12"
           >
-            <div className="space-y-6">
-              <label className="small-caps block">Strategic Objectives</label>
-              <div className="grid grid-cols-1 gap-4">
-                {[
-                  'Asset Preservation', 
-                  'Risk Mitigation', 
-                  'Strategic Reinvestment', 
-                  'Offshore Deployment',
-                  'Intergenerational Transfer'
-                ].map(goal => (
-                  <button
-                    key={goal}
-                    onClick={() => {
-                      const goals = formData.goals.includes(goal) 
-                        ? formData.goals.filter(g => g !== goal)
-                        : [...formData.goals, goal];
-                      setFormData({...formData, goals});
-                    }}
-                    className={cn(
-                      "h-16 px-8 rounded-2xl border text-left flex items-center justify-between transition-all duration-300",
-                      formData.goals.includes(goal) ? "border-gold text-gold bg-gold/10" : "border-white/5 bg-apple-card text-apple-text-tertiary hover:border-white/20"
-                    )}
-                  >
-                    <span className="text-body font-semibold">{goal}</span>
-                    <AnimatePresence>
-                      {formData.goals.includes(goal) && (
-                        <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
-                          <CheckCircle2 className="w-6 h-6" />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </button>
-                ))}
-              </div>
+            <div className="p-8 bg-teal/5 border border-teal/10 rounded-2xl">
+               <Zap className="w-8 h-8 text-teal mb-6" />
+               <p className="text-headline font-bold mb-4 text-white">Security Protocol Initialized</p>
+               <p className="text-body text-apple-text-tertiary leading-relaxed">
+                 By finalizing your profile, you establish a private local vault. All strategic calculations are performed within this secure environment.
+               </p>
             </div>
-            <div className="flex gap-4 pt-12">
-              <button onClick={() => setStep(2)} className="premium-btn-secondary flex-1">Back</button>
-              <button onClick={handleFinish} className="premium-btn-primary flex-1">Establish Profile</button>
+            <div className="flex flex-col gap-6">
+              <button onClick={handleFinish} className="premium-btn-primary w-full shadow-2xl shadow-teal/20">Enter Sanctuary</button>
+              <button onClick={() => setStep(2)} className="text-caption text-apple-text-tertiary font-bold uppercase tracking-widest hover:text-white transition-colors">Return to Step 2</button>
             </div>
           </motion.div>
         )}
@@ -936,12 +974,12 @@ function DashboardView({
         <div>
           <span className="small-caps mb-4 block">Portfolio Overview</span>
           <h1 className="text-title md:text-large-title font-bold tracking-tight">
-            Welcome, <span className="text-gold">{profile.displayName?.split(' ')[0] || 'Strategist'}</span>
+            Welcome, <span className="text-teal">{profile.displayName?.split(' ')[0] || 'Strategist'}</span>
           </h1>
         </div>
         <div className="flex gap-8 items-center">
           <div className="w-12 h-12 rounded-full border border-white/5 bg-apple-card flex items-center justify-center">
-             <Shield className="w-5 h-5 text-gold/60" />
+             <Shield className="w-5 h-5 text-teal/60" />
           </div>
         </div>
       </header>
@@ -957,10 +995,10 @@ function DashboardView({
               <div className="p-8 md:p-12">
                  <div className="flex justify-between items-start mb-8">
                    <div className="space-y-4">
-                     <span className="text-gold/60 text-caption font-bold uppercase tracking-widest">Immediate Optimization</span>
+                     <span className="text-teal/60 text-caption font-bold uppercase tracking-widest">Immediate Optimization</span>
                      <h3 className="text-headline font-bold">Tax Regime Optimization</h3>
                    </div>
-                   <span className="text-caption font-bold px-4 py-1.5 bg-gold/10 border border-gold/30 rounded-full text-gold">High Impact</span>
+                   <span className="text-caption font-bold px-4 py-1.5 bg-teal/10 border border-teal/30 rounded-full text-teal">High Impact</span>
                  </div>
                  <p className="text-apple-text-secondary mb-12 text-body leading-relaxed max-w-2xl">
                    Based on your {profile.employmentType} structure, opting for the {betterRegime} Regime {betterRegime === 'New' ? '(Section 115BAC)' : ''} could realize a ₹{savings.toLocaleString('en-IN')} tax reduction compared to the {worseRegime} Regime.
@@ -1030,7 +1068,7 @@ function DashboardView({
             <SectionHeader title="Recent Assets" icon={<FileText className="w-4 h-4" />} />
             <div className="apple-card border-dashed border-white/10 text-center bg-transparent">
                <p className="text-apple-text-tertiary text-subtext mb-6">Secure vault is current.</p>
-               <button className="text-gold text-caption font-bold uppercase tracking-widest hover:tracking-widest transition-all">
+               <button className="text-teal text-caption font-bold uppercase tracking-widest hover:tracking-widest transition-all">
                   Access Vault
                </button>
             </div>
@@ -1055,13 +1093,13 @@ function DashboardField({
   description: string
 }) {
   return (
-    <div className="apple-card p-6 space-y-4 hover:border-gold/20 transition-all">
+    <div className="apple-card p-6 space-y-4 hover:border-teal/20 transition-all">
       <div className="flex justify-between items-center">
         <label className="text-[10px] font-bold text-apple-text-tertiary uppercase tracking-widest">{label}</label>
-        {max && <span className="text-[9px] font-mono text-gold/60">Limit: ₹{max/1000}k</span>}
+        {max && <span className="text-[9px] font-mono text-teal/60">Limit: ₹{max/1000}k</span>}
       </div>
       <div className="relative">
-        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gold font-bold text-body">₹</span>
+        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-teal font-bold text-body">₹</span>
         <input 
           type="number" 
           value={value || ''} 
@@ -1071,7 +1109,7 @@ function DashboardField({
             else if (max && val > max) onChange(max);
             else onChange(val);
           }}
-          className="w-full bg-apple-elevated border border-white/5 h-12 rounded-xl pl-10 pr-4 outline-none text-body font-bold focus:border-gold/30 transition-all"
+          className="w-full bg-apple-elevated border border-white/5 h-12 rounded-xl pl-10 pr-4 outline-none text-body font-bold focus:border-teal/30 transition-all"
         />
       </div>
       <p className="text-[9px] text-apple-text-tertiary italic">{description}</p>
@@ -1084,7 +1122,7 @@ function TimelineItem({ date, title, status, sub }: { date: string, title: strin
     <div className="p-8 flex items-center gap-8 group hover:bg-apple-elevated transition-colors duration-200">
       <div className="text-center w-12 shrink-0">
         <p className="text-caption font-bold text-apple-text-tertiary">{date.split(' ')[0]}</p>
-        <p className="text-headline font-bold text-gold">{date.split(' ')[1]}</p>
+        <p className="text-headline font-bold text-teal">{date.split(' ')[1]}</p>
       </div>
       <div className="flex-1">
         <p className="text-body font-bold text-white mb-1 leading-tight">{title}</p>
@@ -1149,7 +1187,11 @@ function VaultView({
   };
 
   const handleStartAnalysis = async () => {
-    if (!stagedFile || !userId) return;
+    const u = auth.currentUser;
+    if (!stagedFile || !u) {
+      setAnalysisError("Login required or access denied");
+      return;
+    }
     setAnalyzing(true);
     setAnalysisError(null);
     setPermissionDeniedMessage(null);
@@ -1158,11 +1200,12 @@ function VaultView({
     reader.onload = async () => {
       try {
         const text = reader.result as string;
-        const analysis = await analyzeTaxDocuments({ uid: userId }, [text]);
+        const currentUid = u.uid;
+        const analysis = await analyzeTaxDocuments({ uid: currentUid }, [text]);
         
         // Save to Firestore
-        const docRef = await addDoc(collection(db, 'users', userId, 'documents'), {
-          userId,
+        await addDoc(collection(db, 'users', currentUid, 'documents'), {
+          userId: currentUid,
           name: stagedFile.name,
           type: stagedFile.type,
           size: stagedFile.size,
@@ -1178,7 +1221,12 @@ function VaultView({
         setAnalysisError(null);
       } catch (err) {
         console.error("Analysis failed:", err);
-        setAnalysisError("Analysis failed, try again");
+        const msg = (err as any).message || "";
+        if (msg.includes('permission-denied')) {
+          setAnalysisError("Login required or access denied");
+        } else {
+          setAnalysisError("Analysis failed, try again");
+        }
         setAnalyzing(false);
       }
     };
@@ -1216,8 +1264,8 @@ function VaultView({
               exit={{ opacity: 0, scale: 0.95 }}
               className="apple-card-elevated max-w-sm w-full text-center p-12 border border-white/5"
             >
-              <div className="w-16 h-16 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-8">
-                <Shield className="text-gold w-8 h-8" />
+              <div className="w-16 h-16 bg-teal/10 rounded-full flex items-center justify-center mx-auto mb-8">
+                <Shield className="text-teal w-8 h-8" />
               </div>
               <h2 className="text-headline font-bold mb-4">Data Privacy Consent</h2>
               <div className="space-y-6 mb-10">
@@ -1226,15 +1274,15 @@ function VaultView({
                 </p>
                 <div className="p-4 bg-apple-elevated rounded-2xl border border-white/5 space-y-3 text-left">
                   <div className="flex items-center gap-3">
-                    <div className="w-1.5 h-1.5 rounded-full bg-gold shrink-0" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-teal shrink-0" />
                     <p className="text-subtext text-white font-medium">Your data is strictly private and encrypted.</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <div className="w-1.5 h-1.5 rounded-full bg-gold shrink-0" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-teal shrink-0" />
                     <p className="text-subtext text-white font-medium">You maintain full control and can delete your data at any time.</p>
                   </div>
                   <div className="flex items-center gap-3">
-                    <div className="w-1.5 h-1.5 rounded-full bg-gold shrink-0" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-teal shrink-0" />
                     <p className="text-subtext text-white font-medium">We never share your financial profile with third parties.</p>
                   </div>
                 </div>
@@ -1260,8 +1308,8 @@ function VaultView({
               <FilterBtn icon={<Zap className="w-4 h-4" />}>Strategy</FilterBtn>
             </div>
 
-            <div className="apple-card p-6 bg-gold/[0.02] border-gold/10 hidden lg:block">
-              <p className="text-[10px] font-bold text-gold uppercase tracking-[0.2em] mb-4">Mobile Connectivity</p>
+            <div className="apple-card p-6 bg-teal/[0.02] border-teal/10 hidden lg:block">
+              <p className="text-[10px] font-bold text-teal uppercase tracking-[0.2em] mb-4">Mobile Connectivity</p>
               <div className="aspect-square bg-white p-2 rounded-xl mb-4 overflow-hidden">
                 <img 
                   src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent('https://ais-pre-2z2teuckfhcelspwtt72vb-602455049138.asia-southeast1.run.app')}`} 
@@ -1272,7 +1320,7 @@ function VaultView({
               <p className="text-caption text-apple-text-secondary leading-relaxed mb-3">
                 Scan to sync this audit directly to your mobile device.
               </p>
-              <div className="flex items-center gap-2 text-gold">
+              <div className="flex items-center gap-2 text-teal">
                 <Shield className="w-3 h-3" />
                 <span className="text-[9px] font-bold uppercase tracking-widest">Secure Link</span>
               </div>
@@ -1286,7 +1334,7 @@ function VaultView({
                {analyzing ? (
                  <motion.div key="analyzing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
                    <div className="w-20 h-20 bg-apple-elevated rounded-full flex items-center justify-center mx-auto mb-10">
-                     <Loader2 className="w-10 h-10 text-gold animate-spin" />
+                     <Loader2 className="w-10 h-10 text-teal animate-spin" />
                    </div>
                    <h3 className="text-title font-bold mb-4 tracking-tight">AI Evaluation in Progress</h3>
                    <p className="text-apple-text-secondary mb-12 max-w-sm mx-auto text-body leading-relaxed">
@@ -1295,8 +1343,8 @@ function VaultView({
                  </motion.div>
                ) : stagedFile ? (
                  <motion.div key="staged" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
-                   <div className={cn("w-20 h-20 border rounded-full flex items-center justify-center mx-auto mb-10 transition-colors", analysisError ? "bg-apple-error/5 border-apple-error/20" : "bg-gold/5 border-gold/20")}>
-                     {analysisError ? <AlertCircle className="w-10 h-10 text-apple-error" /> : <FileText className="w-10 h-10 text-gold" />}
+                   <div className={cn("w-20 h-20 border rounded-full flex items-center justify-center mx-auto mb-10 transition-colors", analysisError ? "bg-apple-error/5 border-apple-error/20" : "bg-teal/5 border-teal/20")}>
+                     {analysisError ? <AlertCircle className="w-10 h-10 text-apple-error" /> : <FileText className="w-10 h-10 text-teal" />}
                    </div>
                    <h3 className="text-title font-bold mb-2 tracking-tight">{stagedFile.name}</h3>
                    <p className="text-apple-text-tertiary mb-12 font-bold uppercase tracking-widest text-caption">{analysisError || "Locally Staged • Awaiting Instructions"}</p>
@@ -1340,7 +1388,7 @@ function VaultView({
                   <div className="absolute top-0 right-0 p-8">
                     <CheckCircle2 className="w-6 h-6 text-apple-success" />
                   </div>
-                  <span className="small-caps text-gold mb-12 block">Executive Summary</span>
+                  <span className="small-caps text-teal mb-12 block">Executive Summary</span>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
                     <div className="space-y-6">
                        <p className="text-apple-text-tertiary text-caption font-bold uppercase tracking-[0.2em]">Audit Risk Coefficient</p>
@@ -1354,13 +1402,13 @@ function VaultView({
                 </div>
 
                 {result.extractedValues && (
-                  <div className="apple-card border border-gold/30 bg-gold/[0.03] overflow-hidden">
-                    <div className="p-8 border-b border-gold/10 flex justify-between items-center">
+                  <div className="apple-card border border-teal/30 bg-teal/[0.03] overflow-hidden">
+                    <div className="p-8 border-b border-teal/10 flex justify-between items-center">
                       <div className="flex items-center gap-3">
-                        <Zap className="w-5 h-5 text-gold" />
+                        <Zap className="w-5 h-5 text-teal" />
                         <h3 className="text-headline font-bold">Data Discovered</h3>
                       </div>
-                      <span className="text-[10px] font-bold text-gold uppercase tracking-[0.2em]">Ready for Simulator</span>
+                      <span className="text-[10px] font-bold text-teal uppercase tracking-[0.2em]">Ready for Simulator</span>
                     </div>
                     <div className="p-8">
                       <p className="text-apple-text-secondary text-subtext mb-8">
@@ -1379,8 +1427,14 @@ function VaultView({
                   </div>
                 )}
 
-                {result.actionPlan && result.actionPlan.length > 0 && (
-                  <ActionPlanSection userId={userId} plan={result.actionPlan} />
+                {result.actionPlan && (
+                  <ActionPlanSection 
+                    userId={userId} 
+                    plan={Array.from(new Map([
+                      ...(result.actionPlan || []),
+                      ...generateTaxStrategy(profile.income || 0, profile.deductions || {})
+                    ].map(item => [item.title, item])).values()).sort((a, b) => (b.benefit || 0) - (a.benefit || 0))} 
+                  />
                 )}
 
                 <div className="space-y-8">
@@ -1392,13 +1446,13 @@ function VaultView({
                           <h4 className="text-headline font-bold">{opt.title}</h4>
                           <span className={cn(
                             "text-[10px] font-bold px-3 py-1 bg-white/5 rounded-full uppercase tracking-widest",
-                            opt.impact === 'High' ? 'text-gold' : 'text-apple-text-tertiary'
+                            opt.impact === 'High' ? 'text-teal' : 'text-apple-text-tertiary'
                           )}>{opt.impact} Impact</span>
                         </div>
                         <p className="text-apple-text-secondary text-subtext leading-relaxed">{opt.description}</p>
                         <div className="pt-4 border-t border-white/5 flex justify-between items-center">
                            <span className="text-caption font-mono text-apple-text-tertiary">{opt.lawReference}</span>
-                           <span className="text-caption font-bold text-gold">{opt.confidence}% Confidence</span>
+                           <span className="text-caption font-bold text-teal">{opt.confidence}% Confidence</span>
                         </div>
                       </div>
                     ))}
@@ -1417,7 +1471,7 @@ function VaultView({
                   onClick={() => onSelect(doc)}
                   className="apple-card flex items-center gap-8 group hover:bg-apple-elevated transition-colors cursor-pointer border-white/5 active:scale-[0.98]"
                 >
-                   <div className="w-14 h-14 bg-apple-elevated rounded-full flex items-center justify-center text-gold group-hover:bg-gold group-hover:text-black transition-all">
+                   <div className="w-14 h-14 bg-apple-elevated rounded-full flex items-center justify-center text-teal group-hover:bg-teal group-hover:text-black transition-all">
                      <FileText className="w-6 h-6" />
                    </div>
                    <div>
@@ -1476,15 +1530,15 @@ function ProfileView({
       
       <div className="space-y-12">
         <div className="apple-card-elevated flex flex-col items-center text-center">
-           <Shield className="w-12 h-12 text-gold/20 absolute top-8 right-8" />
-           <div className="w-24 h-24 rounded-full bg-apple-card border border-white/5 flex items-center justify-center text-gold mb-8">
+           <Shield className="w-12 h-12 text-teal/20 absolute top-8 right-8" />
+           <div className="w-24 h-24 rounded-full bg-apple-card border border-white/5 flex items-center justify-center text-teal mb-8">
               <UserIcon size={40} strokeWidth={1} />
            </div>
            <h2 className="text-title font-bold mb-2">{profile.displayName}</h2>
            <p className="text-subtext text-apple-text-tertiary font-medium mb-8">{profile.email}</p>
            <div className="flex gap-4">
-              <div className="px-6 py-2 bg-gold/10 border border-gold/20 rounded-full">
-                 <span className="text-caption font-bold text-gold uppercase tracking-widest">Premium Tier</span>
+              <div className="px-6 py-2 bg-teal/10 border border-teal/20 rounded-full">
+                 <span className="text-caption font-bold text-teal uppercase tracking-widest">Premium Tier</span>
               </div>
            </div>
         </div>
@@ -1514,14 +1568,14 @@ function ProfileView({
              className="w-full p-8 flex items-center justify-between hover:bg-white/[0.01] transition-colors group"
            >
               <span className="small-caps">Privacy Policy</span>
-              <ChevronRight className="w-4 h-4 text-apple-text-tertiary group-hover:text-gold transition-colors" />
+              <ChevronRight className="w-4 h-4 text-apple-text-tertiary group-hover:text-teal transition-colors" />
            </button>
            <button 
              onClick={onOpenTerms}
              className="w-full p-8 flex items-center justify-between hover:bg-white/[0.01] transition-colors group"
            >
               <span className="small-caps">Terms of Use</span>
-              <ChevronRight className="w-4 h-4 text-apple-text-tertiary group-hover:text-gold transition-colors" />
+              <ChevronRight className="w-4 h-4 text-apple-text-tertiary group-hover:text-teal transition-colors" />
            </button>
         </div>
 
@@ -1579,10 +1633,19 @@ function ActionPlanSection({ userId, plan }: { userId: string, plan: any[] }) {
   
   React.useEffect(() => {
     const fetchProgress = async () => {
-      const docRef = doc(db, 'users', userId);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        setCompletedIds(snap.data().completedStepIds || []);
+      const u = auth.currentUser;
+      if (!u || u.uid !== userId) return;
+
+      try {
+        const docRef = doc(db, 'users', u.uid);
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          setCompletedIds(snap.data().completedStepIds || []);
+        }
+      } catch (err: any) {
+        if (err.message?.includes('permission-denied')) {
+          console.error("[ACTION_PLAN]: Permission denied.");
+        }
       }
     };
     fetchProgress();
@@ -1601,15 +1664,24 @@ function ActionPlanSection({ userId, plan }: { userId: string, plan: any[] }) {
   };
 
   const executeToggle = async (stepId: string) => {
+    const u = auth.currentUser;
+    if (!u || u.uid !== userId) return;
+
     const isDone = completedIds.includes(stepId);
     const newCompleted = isDone 
       ? completedIds.filter(id => id !== stepId)
       : [...completedIds, stepId];
     
     setCompletedIds(newCompleted);
-    await updateDoc(doc(db, 'users', userId), {
-      completedStepIds: isDone ? arrayRemove(stepId) : arrayUnion(stepId)
-    });
+    try {
+      await updateDoc(doc(db, 'users', u.uid), {
+        completedStepIds: isDone ? arrayRemove(stepId) : arrayUnion(stepId)
+      });
+    } catch (err: any) {
+      if (err.message?.includes('permission-denied')) {
+        console.error("[ACTION_PLAN]: Permission denied.");
+      }
+    }
   };
 
   const progress = (completedIds.length / plan.length) * 100;
@@ -1626,13 +1698,13 @@ function ActionPlanSection({ userId, plan }: { userId: string, plan: any[] }) {
         <div className="w-full md:w-64 space-y-4">
           <div className="flex justify-between items-center text-caption font-bold uppercase tracking-widest text-apple-text-tertiary">
             <span>Optimization Progress</span>
-            <span className="text-gold">{Math.round(progress)}%</span>
+            <span className="text-teal">{Math.round(progress)}%</span>
           </div>
           <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
             <motion.div 
               initial={{ width: 0 }}
               animate={{ width: `${progress}%` }}
-              className="h-full bg-gold shadow-[0_0_10px_rgba(212,175,55,0.4)]"
+              className="h-full bg-teal shadow-[0_0_10px_rgba(0,128,128,0.4)]"
             />
           </div>
         </div>
@@ -1681,7 +1753,7 @@ function ActionPlanCard({ step, number, done, onToggle }: ActionPlanCardProps) {
     <div className={cn(
       "apple-card p-0 overflow-hidden border transition-all duration-300",
       done ? "border-apple-success/20 bg-apple-success/[0.02]" : "border-white/5",
-      isExpanded ? "ring-1 ring-gold/20" : ""
+      isExpanded ? "ring-1 ring-teal/20" : ""
     )}>
       <div 
         className="p-8 flex items-center gap-8 cursor-pointer"
@@ -1699,7 +1771,7 @@ function ActionPlanCard({ step, number, done, onToggle }: ActionPlanCardProps) {
              <h4 className={cn("text-headline font-bold truncate", done && "text-apple-text-tertiary line-through")}>{step.title}</h4>
              <span className={cn(
                "text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest",
-               step.priority === 'High' ? 'bg-gold/10 text-gold shadow-[0_0_10px_rgba(212,175,55,0.15)]' : 'bg-white/5 text-apple-text-tertiary'
+               step.priority === 'High' ? 'bg-teal/10 text-teal shadow-[0_0_10px_rgba(0,128,128,0.15)]' : 'bg-white/5 text-apple-text-tertiary'
              )}>{step.priority} Priority</span>
           </div>
           {!isExpanded && <p className="text-subtext text-apple-text-tertiary truncate">{step.action}</p>}
@@ -1721,19 +1793,19 @@ function ActionPlanCard({ step, number, done, onToggle }: ActionPlanCardProps) {
             <div className="p-10 space-y-12 bg-apple-black/40">
                <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
                   <div className="space-y-4">
-                     <label className="small-caps decoration-gold/40 underline underline-offset-8 decoration-2">Protocol Action</label>
+                     <label className="small-caps decoration-teal/40 underline underline-offset-8 decoration-2">Protocol Action</label>
                      <p className="text-body text-white font-medium leading-relaxed">{step.action}</p>
                   </div>
                   <div className="space-y-4">
-                     <label className="small-caps decoration-gold/40 underline underline-offset-8 decoration-2">Strategic Rationale</label>
+                     <label className="small-caps decoration-teal/40 underline underline-offset-8 decoration-2">Strategic Rationale</label>
                      <p className="text-body text-apple-text-secondary leading-relaxed">{step.why}</p>
                   </div>
                </div>
 
                <div className="flex flex-wrap items-center gap-12 pt-8 border-t border-white/5">
                   <div className="flex items-center gap-3">
-                    <AlertCircle className="w-4 h-4 text-gold" />
-                    <span className="text-caption font-mono text-gold uppercase tracking-widest">{step.law}</span>
+                    <AlertCircle className="w-4 h-4 text-teal" />
+                    <span className="text-caption font-mono text-teal uppercase tracking-widest">{step.law}</span>
                   </div>
                   <div className="flex items-center gap-3">
                     <TrendingUp className="w-4 h-4 text-apple-success" />
@@ -1753,12 +1825,12 @@ function FilterBtn({ children, active, icon }: { children: React.ReactNode, acti
     <button className={cn(
       "w-full flex items-center gap-4 px-6 py-4 rounded-2xl text-subtext font-bold transition-all duration-500 border",
       active 
-        ? "bg-gold/10 border-gold/30 text-gold shadow-[0_0_20px_rgba(212,175,55,0.1)]" 
+        ? "bg-teal/10 border-teal/30 text-teal shadow-[0_0_20px_rgba(0,128,128,0.1)]" 
         : "bg-apple-card border-white/5 text-apple-text-tertiary hover:bg-apple-elevated hover:text-white"
     )}>
       <div className={cn(
         "p-2 rounded-lg transition-colors",
-        active ? "bg-gold text-black" : "bg-apple-elevated text-apple-text-tertiary"
+        active ? "bg-teal text-black" : "bg-apple-elevated text-apple-text-tertiary"
       )}>
         {icon}
       </div>

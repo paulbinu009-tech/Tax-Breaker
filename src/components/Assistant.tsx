@@ -77,7 +77,7 @@ export default function Assistant({
               isOnline ? "bg-apple-success shadow-[0_0_12px_rgba(48,209,88,0.4)]" : "bg-apple-warning shadow-[0_0_12px_rgba(255,159,10,0.4)]"
             )} />
             <div>
-              <p className="text-caption font-bold uppercase tracking-[0.2em] text-gold">Premium Concierge</p>
+              <p className="text-caption font-bold uppercase tracking-[0.2em] text-teal">Premium Concierge</p>
               <p className="text-caption text-apple-text-tertiary font-medium">
                 {isOnline ? 'End-to-end Encryption Active' : 'Offline Mode Active'}
               </p>
@@ -109,9 +109,9 @@ export default function Assistant({
            <div className="px-4">
              <span className="text-caption font-bold uppercase tracking-widest mb-3 block text-apple-text-tertiary">Advisor</span>
              <div className="flex gap-2">
-               <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1.5 }} className="w-1.5 h-1.5 rounded-full bg-gold" />
-               <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.2 }} className="w-1.5 h-1.5 rounded-full bg-gold" />
-               <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.4 }} className="w-1.5 h-1.5 rounded-full bg-gold" />
+               <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1.5 }} className="w-1.5 h-1.5 rounded-full bg-teal" />
+               <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.2 }} className="w-1.5 h-1.5 rounded-full bg-teal" />
+               <motion.div animate={{ opacity: [0.2, 1, 0.2] }} transition={{ repeat: Infinity, duration: 1.5, delay: 0.4 }} className="w-1.5 h-1.5 rounded-full bg-teal" />
              </div>
            </div>
          )}
@@ -125,13 +125,13 @@ export default function Assistant({
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}
               placeholder={isOnline ? "Ask a technical tax question..." : "Intelligence Hub (OFFLINE)"}
               disabled={!isOnline}
-              className="w-full bg-transparent border-b border-white/10 h-12 px-0 outline-none focus:border-gold transition-all font-normal text-body placeholder:text-apple-text-tertiary disabled:opacity-50"
+              className="w-full bg-transparent border-b border-white/10 h-12 px-0 outline-none focus:border-teal transition-all font-normal text-body placeholder:text-apple-text-tertiary disabled:opacity-50"
             />
             <button 
               onClick={handleSend}
               className={cn(
                 "absolute right-0 top-3 text-apple-text-tertiary transition-all",
-                input.trim() ? "text-gold opacity-100" : "opacity-0 invisible"
+                input.trim() ? "text-teal opacity-100" : "opacity-0 invisible"
               )}
             >
               <Send className="w-5 h-5" />

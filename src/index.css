@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 @theme {
-  --color-gold: #D4AF37;
-  --color-gold-highlight: #E6C76E;
-  --color-gold-pressed: #A8892C;
+  --color-teal: #2DD4BF;
+  --color-teal-highlight: #5EEAD4;
+  --color-teal-pressed: #0F766E;
   --color-apple-black: #000000;
   --color-apple-secondary: #0B0B0D;
   --color-apple-card: #121214;
@@ -52,12 +52,12 @@
 
   .premium-btn-primary {
     @apply h-14 px-8 rounded-2xl font-semibold transition-all duration-200 active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2;
-    background: var(--color-gold);
+    background: var(--color-teal);
     color: #000;
   }
   
   .premium-btn-primary:active {
-    background: var(--color-gold-pressed);
+    background: var(--color-teal-pressed);
   }
 
   .premium-btn-secondary {
@@ -75,11 +75,11 @@
     color: var(--color-apple-text-tertiary);
   }
   
-  .gold-text-gradient {
+  .teal-text-gradient {
     color: transparent;
     background-clip: text;
     -webkit-background-clip: text;
-    background-image: linear-gradient(135deg, #A8892C 0%, #D4AF37 50%, #E6C76E 100%);
+    background-image: linear-gradient(135deg, #0F766E 0%, #2DD4BF 50%, #5EEAD4 100%);
   }
 
   .custom-scrollbar::-webkit-scrollbar {
@@ -93,6 +93,6 @@
     border-radius: 10px;
   }
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: var(--color-gold-pressed);
+    background: var(--color-teal-pressed);
   }
 }

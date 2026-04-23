@@ -18,7 +18,7 @@ export function PrivacyPolicyScreen({ onBack }: LegalScreenProps) {
       </button>
 
       <div className="flex items-center gap-3 mb-8">
-        <Shield className="text-gold w-6 h-6" />
+        <Shield className="text-teal w-6 h-6" />
         <h1 className="text-large-title font-bold">Privacy Policy</h1>
       </div>
 
@@ -78,7 +78,7 @@ export function TermsScreen({ onBack }: LegalScreenProps) {
       </button>
 
       <div className="flex items-center gap-3 mb-8">
-        <FileText className="text-gold w-6 h-6" />
+        <FileText className="text-teal w-6 h-6" />
         <h1 className="text-large-title font-bold">Terms of Use</h1>
       </div>
 

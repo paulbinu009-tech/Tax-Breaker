@@ -103,7 +103,7 @@ export default function FilingGuide({
     <div className="max-w-4xl mx-auto px-8 py-20 pb-40">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-4">
-          <div className="w-10 h-10 bg-gold/10 rounded-xl flex items-center justify-center text-gold">
+          <div className="w-10 h-10 bg-teal/10 rounded-xl flex items-center justify-center text-teal">
             <ClipboardList className="w-5 h-5" />
           </div>
           <div>
@@ -118,7 +118,7 @@ export default function FilingGuide({
 
       <div className="apple-card mt-12 p-10 overflow-hidden relative">
         <div className="absolute top-0 right-0 p-10 opacity-5">
-           <Shield className="w-32 h-32 text-gold" />
+           <Shield className="w-32 h-32 text-teal" />
         </div>
         
         <div className="flex justify-between items-end mb-8">
@@ -136,7 +136,7 @@ export default function FilingGuide({
            <motion.div 
              initial={{ width: 0 }}
              animate={{ width: `${readinessScore}%` }}
-             className="h-full bg-gold shadow-[0_0_12px_rgba(212,175,55,0.4)]"
+             className="h-full bg-teal shadow-[0_0_12px_rgba(0,128,128,0.4)]"
            />
         </div>
       </div>
@@ -151,7 +151,7 @@ export default function FilingGuide({
               key={step.id}
               className={cn(
                 "apple-card p-0 overflow-hidden transition-all duration-500",
-                isExpanded ? "border-gold/30 bg-gold/[0.02]" : "hover:bg-white/[0.02]"
+                isExpanded ? "border-teal/30 bg-teal/[0.02]" : "hover:bg-white/[0.02]"
               )}
             >
               <div 
@@ -168,7 +168,7 @@ export default function FilingGuide({
                       "w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-500",
                       isDone 
                         ? "bg-apple-success border-apple-success text-black scale-110 shadow-[0_0_12px_rgba(48,209,88,0.3)]" 
-                        : "border-white/20 hover:border-gold"
+                        : "border-white/20 hover:border-teal"
                     )}
                   >
                     {isDone && <Check className="w-5 h-5 stroke-[3px]" />}
@@ -185,7 +185,7 @@ export default function FilingGuide({
                 </div>
                 <ChevronRight className={cn(
                   "w-5 h-5 text-apple-text-tertiary transition-transform duration-500",
-                  isExpanded && "rotate-90 text-gold"
+                  isExpanded && "rotate-90 text-teal"
                 )} />
               </div>
 
@@ -198,13 +198,13 @@ export default function FilingGuide({
                   <div className="space-y-4">
                     {step.details.map((detail, dIdx) => (
                       <div key={dIdx} className="flex gap-4">
-                        <div className="w-1.5 h-1.5 rounded-full bg-gold shrink-0 mt-2" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-teal shrink-0 mt-2" />
                         <p className="text-body text-apple-text-secondary leading-relaxed">{detail}</p>
                       </div>
                     ))}
                   </div>
                   <div className="mt-8 pt-8 border-t border-white/5 flex items-center gap-3">
-                    <Info className="w-4 h-4 text-gold" />
+                    <Info className="w-4 h-4 text-teal" />
                     <p className="text-caption text-apple-text-tertiary italic">
                       Verify these records against your bank statements for 100% audit durability.
                     </p>
@@ -217,7 +217,7 @@ export default function FilingGuide({
       </div>
 
       <div className="mt-20 apple-card p-12 text-center bg-apple-elevated/50 border border-white/5">
-        <Shield className="w-12 h-12 text-gold/20 mx-auto mb-6" />
+        <Shield className="w-12 h-12 text-teal/20 mx-auto mb-6" />
         <h3 className="text-headline font-bold mb-4">Precision Compliance Achieved?</h3>
         <p className="text-body text-apple-text-secondary mb-10 max-w-sm mx-auto">
           Once all mandates are verified, you are ready to transmit your digital tax profile to the ITR portal.
